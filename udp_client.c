@@ -58,7 +58,14 @@ int main(int argc, char **argv) {
 
     /* get a message from the user */
     bzero(buf, BUFSIZE);
-    printf("Please enter msg: ");
+    printf("Please enter one of the following messages: \n"
+           "\tget <file_name>\n"
+           "\tput <file_name>\n"
+           "\tdelete <file_name>\n"
+           "\tls\n"
+           "\texit\n"
+           ">"
+    );
     fgets(buf, BUFSIZE, stdin);
 
     /* send the message to the server */
