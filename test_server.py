@@ -3,6 +3,7 @@ import subprocess
 import socket
 import time
 from typing import Generator
+from pathlib import Path
 
 address = "127.0.0.1"
 port = 8080
@@ -95,10 +96,11 @@ class TestServerNonExiting(TestResponses):
         expected_response = self.not_implemented_message_format.format(command=f"delete {filename}").encode()
         assert response == expected_response
 
-    def test_ls_not_implemented(self, client: Client):
+    def test_ls(self, client: Client):
         response = client.ls()
-        expected_response = self.not_implemented_message_format.format(command="ls").encode()
-        assert response == expected_response
+        response_files = response.strip().split(b"\n")
+        local_files = [f.name.encode() for f in Path('.').iterdir() if f.is_file()]
+        assert sorted(response_files) == sorted(local_files)
 
     def test_invalid_commands_sent_back(self, client: Client):
         command = "foo bar"
@@ -129,8 +131,9 @@ class TestServerNonExiting(TestResponses):
     def test_messages_ignore_newlines(self, client: Client):
         command = "ls\n"
         response = client.send_and_receive(command.encode())
-        expected_response = self.not_implemented_message_format.format(command=command).encode()
-        assert response == expected_response
+        response_files = response.strip().split(b"\n")
+        local_files = [f.name.encode() for f in Path('.').iterdir() if f.is_file()]
+        assert sorted(response_files) == sorted(local_files)
 
 
 class TestServerExiting(TestResponses):

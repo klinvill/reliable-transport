@@ -12,13 +12,25 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#include <dirent.h>
+#include <sys/stat.h>
 
 #define BUFSIZE 1024
+#define MAX_FILES 100
 
 #define DELIMITERS " \n\t\r\v\f"
 
 #define PARSE_ERROR -1
 #define NOT_IMPLEMENTED_ERROR -2
+
+
+/*
+ * error - wrapper for perror
+ */
+void error(char *msg) {
+    perror(msg);
+    exit(1);
+}
 
 typedef struct {
     int sockfd;
@@ -26,12 +38,49 @@ typedef struct {
     int clientlen;
 } SocketInfo;
 
-/*
- * error - wrapper for perror
- */
-void error(char *msg) {
-  perror(msg);
-  exit(1);
+typedef struct {
+    int count;
+    char** files;
+} Filenames;
+
+void cleanup_filenames(Filenames* filenames) {
+    for (int i=0; i < filenames->count; i++) {
+        free(filenames->files[i]);
+    }
+    free(filenames->files);
+}
+
+// TODO: do we need to only return files?
+// Need to cleanup the allocated memory Filenames when done
+Filenames ls_files(char* directory) {
+    char** files = malloc(sizeof (char*) * MAX_FILES);
+    int i = 0;
+
+    DIR* dir = opendir(directory);
+
+    if (dir == NULL)
+        error("Could not open directory");
+
+    struct dirent* entry;
+    struct stat entry_info;
+
+    while((entry = readdir(dir)) != NULL) {
+        lstat(entry->d_name, &entry_info);
+        // only return files
+        if (S_ISREG(entry_info.st_mode)) {
+            if (i == MAX_FILES)
+                error("Too many files in directory to return them all");
+
+            size_t filename_size = entry->d_namlen + 1;
+            char* filename = malloc(sizeof(char) * filename_size);
+            strncpy(filename, entry->d_name, filename_size-1);
+            filename[filename_size-1] = 0;
+            files[i] = filename;
+            i++;
+        }
+    }
+
+    return (Filenames) {.count=i, .files=files};
 }
 
 int do_send(char* message, const SocketInfo* socket_info) {
@@ -64,7 +113,28 @@ void send_error(int errno, char* command, const SocketInfo* socket_info) {
 int do_get(char* filename) { return NOT_IMPLEMENTED_ERROR; }
 int do_put(char* filename) { return NOT_IMPLEMENTED_ERROR; }
 int do_delete(char* filename) { return NOT_IMPLEMENTED_ERROR; }
-int do_ls() { return NOT_IMPLEMENTED_ERROR; }
+
+int do_ls(SocketInfo* socket_info) {
+    Filenames filenames = ls_files(".");
+    char message[BUFSIZE] = {0,};
+
+    for (int i=0; i < filenames.count; i++) {
+        char* filename = filenames.files[i];
+        // we check for 2 characters extra to hold a newline character and terminating null character
+        if (strlen(filename) + strlen(message) + 2 < BUFSIZE) {
+            strcat(message, filename);
+            strcat(message, "\n");
+        } else {
+            error("The filenames are too large to all fit into the buffer");
+        }
+    }
+    int ret_code = do_send(message, socket_info);
+
+    // ls_files() allocates memory that needs to be freed
+    cleanup_filenames(&filenames);
+
+    return ret_code;
+}
 
 // does not return
 void do_exit(SocketInfo* socket_info) {
@@ -87,7 +157,7 @@ int process_message(char* message, SocketInfo* socket_info) {
         if(second_token) return PARSE_ERROR;
 
         if(strcmp(first_token, "ls") == 0)
-            return do_ls();
+            return do_ls(socket_info);
         else if (strcmp(first_token, "exit") == 0)
             do_exit(socket_info);
     }
