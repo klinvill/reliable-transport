@@ -10,8 +10,10 @@ port = 8080
 
 class Client:
     BUFSIZE = 1024
+    SOCKET_TIMEOUT = 0.1    # in seconds
 
     def __init__(self, sock: socket.socket):
+        sock.settimeout(self.SOCKET_TIMEOUT)
         self.sock = sock
 
     def get(self, filename: str) -> bytes:
@@ -33,10 +35,16 @@ class Client:
         self.sock.sendto(data, (address, port))
 
     def receive(self) -> bytes:
-        (data, addr) = self.sock.recvfrom(self.BUFSIZE)
-        if addr != (address, port):
-            raise RuntimeError(f"Received message from {addr} instead of {(address, port)}")
-        return data
+        full_data = b''
+        while True:
+            try:
+                (data, addr) = self.sock.recvfrom(self.BUFSIZE)
+            except socket.timeout:
+                break
+            if addr == (address, port):
+                full_data += data
+
+        return full_data
 
     def send_and_receive(self, data: bytes) -> bytes:
         self.send(data)
@@ -78,10 +86,13 @@ class TestResponses:
 
 @pytest.mark.usefixtures("server")
 class TestServerNonExiting(TestResponses):
-    def test_get_not_implemented(self, client: Client):
-        filename = "test.txt"
+    def test_get(self, client: Client):
+        filename = "foo1"
         response = client.get(filename)
-        expected_response = self.not_implemented_message_format.format(command=f"get {filename}").encode()
+
+        with open(filename, "rb") as f:
+            file_contents = f.read()
+        expected_response = file_contents
         assert response == expected_response
 
     def test_put_not_implemented(self, client: Client):

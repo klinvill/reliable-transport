@@ -110,7 +110,25 @@ void send_error(int errno, char* command, const SocketInfo* socket_info) {
 }
 
 // Commands, prefixed with do_ to avoid name collisions (e.g. with exit())
-int do_get(char* filename) { return NOT_IMPLEMENTED_ERROR; }
+int do_get(char* filename, SocketInfo* socket_info) {
+    FILE* f = fopen(filename, "r");
+    if(f == NULL)
+        error("Could not open file for reading");
+
+    char buffer[BUFSIZE] = {0,};
+    int ret_code = 0;
+    size_t bytes_read = 0;
+
+    while((bytes_read = fread(buffer, sizeof(char), BUFSIZE-1, f)) > 0) {
+        buffer[bytes_read] = 0;
+        ret_code = do_send(buffer, socket_info);
+        // TODO: what should I return for ret_code? Right now it's just tracking the last number of bytes read
+        if (ret_code < 0)
+            break;
+    }
+
+    return ret_code;
+}
 int do_put(char* filename) { return NOT_IMPLEMENTED_ERROR; }
 int do_delete(char* filename) { return NOT_IMPLEMENTED_ERROR; }
 
@@ -170,7 +188,7 @@ int process_message(char* message, SocketInfo* socket_info) {
         if (strtok(NULL, DELIMITERS)) return PARSE_ERROR;
 
         if(strcmp(first_token, "get") == 0)
-            return do_get(second_token);
+            return do_get(second_token, socket_info);
         else if (strcmp(first_token, "put") == 0)
             return do_put(second_token);
         else if (strcmp(first_token, "delete") == 0)
@@ -244,6 +262,7 @@ int main(int argc, char **argv) {
      * recvfrom: receive a UDP datagram from a client
      */
     bzero(buf, BUFSIZE);
+    // TODO: should we instead receive BUFSIZE-1 since we generally treat the buffer as a string?
     n = recvfrom(sockfd, buf, BUFSIZE, 0,
 		 (struct sockaddr *) &clientaddr, &clientlen);
     if (n < 0)
