@@ -6,5 +6,8 @@ client: udp_client.c
 server: udp_server.c
 	gcc udp_server.c -o out/server
 
+test: all
+	pytest
+
 clean:
 	rm out/client out/server
