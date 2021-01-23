@@ -35,7 +35,7 @@ void error(char *msg) {
 typedef struct {
     int sockfd;
     struct sockaddr* clientaddr;
-    int clientlen;
+    socklen_t clientlen;
 } SocketInfo;
 
 typedef struct {
@@ -183,7 +183,7 @@ int process_message(char* message, SocketInfo* socket_info) {
 int main(int argc, char **argv) {
   int sockfd; /* socket */
   int portno; /* port to listen on */
-  int clientlen; /* byte size of client's address */
+  socklen_t clientlen; /* byte size of client's address */
   struct sockaddr_in serveraddr; /* server's addr */
   struct sockaddr_in clientaddr; /* client addr */
   struct hostent *hostp; /* client host info */
@@ -261,7 +261,7 @@ int main(int argc, char **argv) {
       error("ERROR on inet_ntoa\n");
     printf("server received datagram from %s (%s)\n", 
 	   hostp->h_name, hostaddrp);
-    printf("server received %d/%d bytes: %s\n", strlen(buf), n, buf);
+    printf("server received %lu/%d bytes: %s\n", strlen(buf), n, buf);
 
     char original_command[BUFSIZE] = {0,};
     strncpy(original_command, buf, BUFSIZE-1);
