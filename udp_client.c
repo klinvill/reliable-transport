@@ -56,28 +56,29 @@ int main(int argc, char **argv) {
 	  (char *)&serveraddr.sin_addr.s_addr, server->h_length);
     serveraddr.sin_port = htons(portno);
 
-    /* get a message from the user */
-    bzero(buf, BUFSIZE);
-    printf("Please enter one of the following messages: \n"
-           "\tget <file_name>\n"
-           "\tput <file_name>\n"
-           "\tdelete <file_name>\n"
-           "\tls\n"
-           "\texit\n"
-           "> "
-    );
-    fgets(buf, BUFSIZE, stdin);
+    while(1) {
+        /* get a message from the user */
+        bzero(buf, BUFSIZE);
+        printf("Please enter one of the following messages: \n"
+               "\tget <file_name>\n"
+               "\tput <file_name>\n"
+               "\tdelete <file_name>\n"
+               "\tls\n"
+               "\texit\n"
+               "> "
+        );
+        fgets(buf, BUFSIZE, stdin);
 
-    /* send the message to the server */
-    serverlen = sizeof(serveraddr);
-    n = sendto(sockfd, buf, strlen(buf), 0, &serveraddr, serverlen);
-    if (n < 0) 
-      error("ERROR in sendto");
-    
-    /* print the server's reply */
-    n = recvfrom(sockfd, buf, BUFSIZE, 0, &serveraddr, &serverlen);
-    if (n < 0) 
-      error("ERROR in recvfrom");
-    printf("< %s\n", buf);
-    return 0;
+        /* send the message to the server */
+        serverlen = sizeof(serveraddr);
+        n = sendto(sockfd, buf, strlen(buf), 0, &serveraddr, serverlen);
+        if (n < 0)
+            error("ERROR in sendto");
+
+        /* print the server's reply */
+        n = recvfrom(sockfd, buf, BUFSIZE, 0, &serveraddr, &serverlen);
+        if (n < 0)
+            error("ERROR in recvfrom");
+        printf("< %s\n", buf);
+    }
 }
