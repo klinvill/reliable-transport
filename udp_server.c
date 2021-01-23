@@ -20,6 +20,12 @@
 #define PARSE_ERROR -1
 #define NOT_IMPLEMENTED_ERROR -2
 
+typedef struct {
+    int sockfd;
+    struct sockaddr* clientaddr;
+    int clientlen;
+} SocketInfo;
+
 /*
  * error - wrapper for perror
  */
@@ -28,13 +34,14 @@ void error(char *msg) {
   exit(1);
 }
 
-void do_send(char* message, int sockfd, struct sockaddr* clientaddr, int clientlen) {
-    int status = sendto(sockfd, message, strlen(message), 0, clientaddr, clientlen);
+void do_send(char* message, const SocketInfo* socket_info) {
+    int status = sendto(socket_info->sockfd, message, strlen(message), 0, socket_info->clientaddr,
+                        socket_info->clientlen);
     if (status < 0)
         error("ERROR in sendto");
 }
 
-void send_error(int errno, char* command, int sockfd, struct sockaddr* clientaddr, int clientlen) {
+void send_error(int errno, char* command, const SocketInfo* socket_info) {
     char err_buff[BUFSIZE] = {0,};
 
     switch (errno) {
@@ -48,7 +55,7 @@ void send_error(int errno, char* command, int sockfd, struct sockaddr* clientadd
             snprintf(err_buff, BUFSIZE, "Unrecognized error code: %d", errno);
     }
 
-    do_send(err_buff, sockfd, clientaddr, clientlen);
+    do_send(err_buff, socket_info);
 }
 
 // Commands, prefixed with do_ to avoid name collisions (e.g. with exit())
@@ -145,10 +152,12 @@ int main(int argc, char **argv) {
 	   sizeof(serveraddr)) < 0) 
     error("ERROR on binding");
 
+  clientlen = sizeof(clientaddr);
+  SocketInfo socket_info = {sockfd, (struct sockaddr *) &clientaddr, clientlen};
+
   /* 
    * main loop: wait for a datagram, then echo it
    */
-  clientlen = sizeof(clientaddr);
   while (1) {
 
     /*
@@ -178,7 +187,7 @@ int main(int argc, char **argv) {
     strncpy(original_command, buf, BUFSIZE-1);
     int status = process_message(buf);
     if (status < 0) {
-        send_error(status, original_command, sockfd, (struct sockaddr *) &clientaddr, clientlen);
+        send_error(status, original_command, &socket_info);
     }
   }
 }
