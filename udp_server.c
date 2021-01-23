@@ -15,7 +15,7 @@
 
 #define BUFSIZE 1024
 
-#define DELIMITERS " "
+#define DELIMITERS " \n\t\r\v\f"
 
 #define PARSE_ERROR -1
 #define NOT_IMPLEMENTED_ERROR -2
@@ -34,11 +34,13 @@ void error(char *msg) {
   exit(1);
 }
 
-void do_send(char* message, const SocketInfo* socket_info) {
+int do_send(char* message, const SocketInfo* socket_info) {
     int status = sendto(socket_info->sockfd, message, strlen(message), 0, socket_info->clientaddr,
                         socket_info->clientlen);
     if (status < 0)
         error("ERROR in sendto");
+
+    return status;
 }
 
 void send_error(int errno, char* command, const SocketInfo* socket_info) {
@@ -59,13 +61,21 @@ void send_error(int errno, char* command, const SocketInfo* socket_info) {
 }
 
 // Commands, prefixed with do_ to avoid name collisions (e.g. with exit())
-int do_get(char* filename) { return NOT_IMPLEMENTED_ERROR; };
-int do_put(char* filename) { return NOT_IMPLEMENTED_ERROR; };
-int do_delete(char* filename) { return NOT_IMPLEMENTED_ERROR; };
-int do_ls() { return NOT_IMPLEMENTED_ERROR; };
-int do_exit() { return NOT_IMPLEMENTED_ERROR; };
+int do_get(char* filename) { return NOT_IMPLEMENTED_ERROR; }
+int do_put(char* filename) { return NOT_IMPLEMENTED_ERROR; }
+int do_delete(char* filename) { return NOT_IMPLEMENTED_ERROR; }
+int do_ls() { return NOT_IMPLEMENTED_ERROR; }
 
-int process_message(char* message) {
+// does not return
+void do_exit(SocketInfo* socket_info) {
+    char* exit_message = "Exiting gracefully";
+    do_send(exit_message, socket_info);
+
+    close(socket_info->sockfd);
+    exit(0);
+}
+
+int process_message(char* message, SocketInfo* socket_info) {
     char* first_token = strtok(message, DELIMITERS);
     if(!first_token) return PARSE_ERROR;
 
@@ -79,7 +89,7 @@ int process_message(char* message) {
         if(strcmp(first_token, "ls") == 0)
             return do_ls();
         else if (strcmp(first_token, "exit") == 0)
-            return do_exit();
+            do_exit(socket_info);
     }
 
     // double arg commands
@@ -185,7 +195,7 @@ int main(int argc, char **argv) {
 
     char original_command[BUFSIZE] = {0,};
     strncpy(original_command, buf, BUFSIZE-1);
-    int status = process_message(buf);
+    int status = process_message(buf, &socket_info);
     if (status < 0) {
         send_error(status, original_command, &socket_info);
     }
