@@ -82,6 +82,7 @@ def run_server() -> Generator[subprocess.Popen, None, None]:
 class TestResponses:
     not_implemented_message_format = "Command not yet implemented: {command}"
     invalid_command_message_format = "Invalid command: {command}"
+    delete_message = b"Deleted file\n"
 
 
 @pytest.mark.usefixtures("server")
@@ -101,10 +102,24 @@ class TestServerNonExiting(TestResponses):
         expected_response = self.not_implemented_message_format.format(command=f"put {filename}").encode()
         assert response == expected_response
 
-    def test_delete_not_implemented(self, client: Client):
+    def test_delete(self, client: Client):
         filename = "test.txt"
+        with open(filename, "w") as f:
+            f.write("Test case, soon to be deleted\n")
+        assert Path(filename).is_file()
+
         response = client.delete(filename)
-        expected_response = self.not_implemented_message_format.format(command=f"delete {filename}").encode()
+        expected_response = self.delete_message
+        assert response == expected_response
+        assert not Path(filename).is_file()
+
+    def test_delete_nonexistent_file_does_nothing(self, client: Client):
+        filename = "test.txt"
+        # test file should not exist
+        assert not Path(filename).is_file()
+
+        response = client.delete(filename)
+        expected_response = b""
         assert response == expected_response
 
     def test_ls(self, client: Client):

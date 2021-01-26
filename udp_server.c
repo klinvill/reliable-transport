@@ -130,7 +130,14 @@ int do_get(char* filename, SocketInfo* socket_info) {
     return ret_code;
 }
 int do_put(char* filename) { return NOT_IMPLEMENTED_ERROR; }
-int do_delete(char* filename) { return NOT_IMPLEMENTED_ERROR; }
+
+int do_delete(char* filename, SocketInfo* socket_info) {
+    // According to given spec, we should do nothing if the file does not exist
+    if (unlink(filename) == 0)
+        return do_send("Deleted file\n", socket_info);
+
+    return 0;
+}
 
 int do_ls(SocketInfo* socket_info) {
     Filenames filenames = ls_files(".");
@@ -192,7 +199,7 @@ int process_message(char* message, SocketInfo* socket_info) {
         else if (strcmp(first_token, "put") == 0)
             return do_put(second_token);
         else if (strcmp(first_token, "delete") == 0)
-            return do_delete(second_token);
+            return do_delete(second_token, socket_info);
     }
 
     return PARSE_ERROR;
