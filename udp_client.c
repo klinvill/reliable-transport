@@ -9,9 +9,13 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
-#include <netdb.h> 
+#include <netdb.h>
+#include <stdbool.h>
+#include <sys/errno.h>
 
 #define BUFSIZE 1024
+// TODO: what should the recv_timeout be?
+#define RECV_TIMEOUT 500000    // in microseconds
 
 /* 
  * error - wrapper for perror
@@ -19,6 +23,33 @@
 void error(char *msg) {
     perror(msg);
     exit(0);
+}
+
+typedef struct {
+    int sockfd;
+    struct sockaddr* serveraddr;
+    socklen_t serverlen;
+} SocketInfo;
+
+void handle_response(SocketInfo* sock_info) {
+    int n = 0;
+    char buf[BUFSIZE];
+
+    bool did_recv_any = false;
+
+    while((n = recvfrom(sock_info->sockfd, buf, BUFSIZE, 0, sock_info->serveraddr, &sock_info->serverlen)) > 0) {
+        did_recv_any = true;
+        buf[n] = 0;
+        printf("%s", buf);
+    }
+
+    if (n < 0 && errno != EWOULDBLOCK)
+        error("ERROR in recvfrom");
+
+    printf("\n");
+
+    if (!did_recv_any)
+        error("Timeout before receiving any data");
 }
 
 int main(int argc, char **argv) {
@@ -39,6 +70,10 @@ int main(int argc, char **argv) {
 
     /* socket: create the socket */
     sockfd = socket(AF_INET, SOCK_DGRAM, 0);
+    struct timeval recv_timeout;
+    recv_timeout.tv_usec = RECV_TIMEOUT;
+    if (setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, &recv_timeout, sizeof(recv_timeout)))
+        error("ERROR setting receive timout for socket");
     if (sockfd < 0) 
         error("ERROR opening socket");
 
@@ -55,6 +90,8 @@ int main(int argc, char **argv) {
     bcopy((char *)server->h_addr, 
 	  (char *)&serveraddr.sin_addr.s_addr, server->h_length);
     serveraddr.sin_port = htons(portno);
+
+    SocketInfo sock_info = {.sockfd=sockfd, .serveraddr=(struct sockaddr*) &serveraddr, .serverlen=serverlen};
 
     while(1) {
         /* get a message from the user */
@@ -75,10 +112,6 @@ int main(int argc, char **argv) {
         if (n < 0)
             error("ERROR in sendto");
 
-        /* print the server's reply */
-        n = recvfrom(sockfd, buf, BUFSIZE, 0, (struct sockaddr*) &serveraddr, &serverlen);
-        if (n < 0)
-            error("ERROR in recvfrom");
-        printf("< %s\n", buf);
+        handle_response(&sock_info);
     }
 }
