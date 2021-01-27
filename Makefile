@@ -12,7 +12,9 @@ server: src/server/udp_server.c
 	mkdir -p out/common
 	gcc -c src/common/utils.c -o out/common/utils.o
 
-test: all
+test: all unit_tests end_to_end_tests
+
+end_to_end_tests:
 	pytest
 
 unit_tests: test_utils
