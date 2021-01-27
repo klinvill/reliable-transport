@@ -7,6 +7,7 @@ from pathlib import Path
 
 address = "127.0.0.1"
 port = 8080
+resources_filepath = Path("tests/resources/")
 
 class Client:
     BUFSIZE = 1024
@@ -72,7 +73,7 @@ def run_server() -> Generator[subprocess.Popen, None, None]:
     """
     yields the port of the run server
     """
-    with subprocess.Popen(["./out/server", str(port)]) as proc:
+    with subprocess.Popen(["./out/server/server", str(port)]) as proc:
         # TODO: should have the server print a message when listening, and then yield after that instead of sleeping
         #  1 second
         time.sleep(1)
@@ -88,37 +89,37 @@ class TestResponses:
 @pytest.mark.usefixtures("server")
 class TestServerNonExiting(TestResponses):
     def test_get(self, client: Client):
-        filename = "foo1"
-        response = client.get(filename)
+        filepath = resources_filepath.joinpath("foo1")
+        response = client.get(filepath)
 
-        with open(filename, "rb") as f:
+        with open(filepath, "rb") as f:
             file_contents = f.read()
         expected_response = file_contents
         assert response == expected_response
 
     def test_put_not_implemented(self, client: Client):
-        filename = "test.txt"
-        response = client.put(filename)
-        expected_response = self.not_implemented_message_format.format(command=f"put {filename}").encode()
+        filepath = resources_filepath.joinpath("test.txt")
+        response = client.put(filepath)
+        expected_response = self.not_implemented_message_format.format(command=f"put {filepath}").encode()
         assert response == expected_response
 
     def test_delete(self, client: Client):
-        filename = "test.txt"
-        with open(filename, "w") as f:
+        filepath = resources_filepath.joinpath("test.txt")
+        with open(filepath, "w") as f:
             f.write("Test case, soon to be deleted\n")
-        assert Path(filename).is_file()
+        assert Path(filepath).is_file()
 
-        response = client.delete(filename)
+        response = client.delete(filepath)
         expected_response = self.delete_message
         assert response == expected_response
-        assert not Path(filename).is_file()
+        assert not Path(filepath).is_file()
 
     def test_delete_nonexistent_file_does_nothing(self, client: Client):
-        filename = "test.txt"
+        filepath = resources_filepath.joinpath("test.txt")
         # test file should not exist
-        assert not Path(filename).is_file()
+        assert not Path(filepath).is_file()
 
-        response = client.delete(filename)
+        response = client.delete(filepath)
         expected_response = b""
         assert response == expected_response
 
