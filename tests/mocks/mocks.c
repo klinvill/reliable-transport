@@ -137,3 +137,34 @@ ssize_t recvfrom(int socket, void *restrict buffer, size_t length, int flags, st
 
     return mock_type(ssize_t);
 }
+
+
+void set_fread_buffer(char* buffer, size_t buff_size, size_t ret_val) {
+    will_return(fread, buff_size);
+    will_return(fread, buffer);
+
+    will_return(fread, ret_val);
+}
+
+int fseek(FILE *stream, long offset, int whence) {
+    return mock_type(int);
+}
+
+long ftell(FILE *stream) {
+    return mock_type(long);
+};
+
+int feof(FILE *stream) {
+    return mock_type(int);
+}
+
+size_t fread(void *restrict ptr, size_t size, size_t nitems, FILE *restrict stream) {
+    size_t in_buffer_len = mock_type(int);
+    char *in_buffer = mock_type(char*);
+    if (in_buffer_len > (size * nitems))
+        return 0;
+
+    memcpy(ptr, in_buffer, in_buffer_len);
+
+    return mock_type(size_t);
+}

@@ -9,7 +9,6 @@
 
 
 #define MAX_PAYLOAD_SIZE 1024
-#define HEADER_SIZE 12
 #define MAX_DATA_SIZE (MAX_PAYLOAD_SIZE - HEADER_SIZE)
 
 #define EMPTY_ACK_NUM 0
@@ -24,11 +23,5 @@
 // sends data as a single UDP message
 int rudp_send(char* data, int data_size, SocketInfo* to, RudpSender* sender);
 int rudp_recv(char* buffer, int buffer_size, SocketInfo* from, RudpReceiver* receiver);
-
-// Special cases that will send or receive the contents of a file in a streaming manner
-// Reads the contents of the file specified by read_fd, and then sends it to the socket specified by to
-void rudp_send_file(int* read_fd, SocketInfo* to);
-// Receives the contents of a file from the socket specified by from, and writes it to the file specified by write_fd
-void rudp_recv_file(int* write_fd, SocketInfo* from);
 
 #endif //UDP_RELIABLE_UDP_H

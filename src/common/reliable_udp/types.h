@@ -11,6 +11,8 @@
 #define PAYLOAD_TOO_LARGE_ERROR -2
 #define SENDER_TIMEOUT_ERROR -3
 
+#define HEADER_SIZE 12
+
 
 typedef struct {
     int sockfd;
