@@ -91,6 +91,7 @@ int main(int argc, char **argv) {
 	  (char *)&serveraddr.sin_addr.s_addr, server->h_length);
     serveraddr.sin_port = htons(portno);
 
+    serverlen = sizeof(serveraddr);
     SocketInfo sock_info = {.sockfd=sockfd, .serveraddr=(struct sockaddr*) &serveraddr, .serverlen=serverlen};
 
     while(1) {
@@ -107,7 +108,6 @@ int main(int argc, char **argv) {
         fgets(buf, BUFSIZE, stdin);
 
         /* send the message to the server */
-        serverlen = sizeof(serveraddr);
         n = sendto(sockfd, buf, strlen(buf), 0, (struct sockaddr*) &serveraddr, serverlen);
         if (n < 0)
             error("ERROR in sendto");
