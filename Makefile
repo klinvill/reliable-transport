@@ -31,11 +31,11 @@ test_utils: .c.o
 test_reliable_udp: .c.o mocks
 	mkdir -p out/tests/common/reliable_udp
 	gcc -lcheck -o out/tests/common/reliable_udp/test_serde tests/common/reliable_udp/test_serde.c out/common/reliable_udp/serde.o
-	gcc -lcheck -o out/tests/common/reliable_udp/test_reliable_udp tests/common/reliable_udp/test_reliable_udp.c out/common/reliable_udp/reliable_udp.o out/common/reliable_udp/serde.o out/common/utils.o out/tests/mocks/mocks.dylib
+	gcc -lcmocka -o out/tests/common/reliable_udp/test_reliable_udp tests/common/reliable_udp/test_reliable_udp.c out/common/reliable_udp/reliable_udp.o out/common/reliable_udp/serde.o out/common/utils.o out/tests/mocks/mocks.dylib
 
 mocks: tests/mocks/mocks.c
 	mkdir -p out/tests/mocks
-	gcc -shared -fPIC tests/mocks/mocks.c -o out/tests/mocks/mocks.dylib
+	gcc -shared -fPIC -lcmocka tests/mocks/mocks.c -o out/tests/mocks/mocks.dylib
 
 clean:
 	rm -r out/*
