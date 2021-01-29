@@ -9,6 +9,9 @@
 
 
 #define MAX_PAYLOAD_SIZE 1024
+#define HEADER_SIZE 12
+#define MAX_DATA_SIZE (MAX_PAYLOAD_SIZE - HEADER_SIZE)
+
 #define EMPTY_ACK_NUM 0
 #define INITIAL_TIMEOUT 200     // in milliseconds, timeout until a message will be resent
 #define SENDER_TIMEOUT 5000     // in milliseconds, timeout until a message is considered impossible to deliver

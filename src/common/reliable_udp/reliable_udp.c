@@ -13,15 +13,15 @@
 #include "../utils.h"
 
 
-int rudp_send(char* data, int data_size, SocketInfo* to, RudpSender* sender) {
-    if(data_size >= MAX_PAYLOAD_SIZE || data_size < 0)
+int rudp_send_chunk(char* data, int data_size, SocketInfo* to, RudpSender* sender) {
+    if(data_size > MAX_DATA_SIZE || data_size < 0)
         return PAYLOAD_TOO_LARGE_ERROR;
 
     RudpHeader header = {.seq_num = sender->last_ack + 1, .ack_num = EMPTY_ACK_NUM, data_size = data_size};
     RudpMessage message = {.header = header, .data = data};
 
     int estimated_serialized_size = data_size + sizeof(header);
-    if (estimated_serialized_size > MAX_PAYLOAD_SIZE)
+    if (estimated_serialized_size > MAX_PAYLOAD_SIZE || estimated_serialized_size < 0)
         return PAYLOAD_TOO_LARGE_ERROR;
 
     char wire_data[MAX_PAYLOAD_SIZE] = {0,};
@@ -30,7 +30,7 @@ int rudp_send(char* data, int data_size, SocketInfo* to, RudpSender* sender) {
     if (wire_data_len < 0)
         return wire_data_len;
 
-    if(wire_data_len > MAX_PAYLOAD_SIZE)
+    if(wire_data_len > MAX_PAYLOAD_SIZE || wire_data_len < 0)
         return PAYLOAD_TOO_LARGE_ERROR;
 
     bool acked = false;
@@ -86,6 +86,25 @@ int rudp_send(char* data, int data_size, SocketInfo* to, RudpSender* sender) {
             }
         }
     } while(!acked);
+
+    return 0;
+}
+
+int rudp_send(char* data, int data_size, SocketInfo* to, RudpSender* sender) {
+    int num_chunks = (data_size / (MAX_DATA_SIZE+1)) + 1;
+    // TODO: error handling
+    if (num_chunks < 1)
+        return -1;
+
+    int bytes_sent = 0;
+    for (int i = 0; i < num_chunks; i++) {
+        int chunk_size = min(data_size - bytes_sent, MAX_DATA_SIZE);
+        int status = rudp_send_chunk(&data[bytes_sent], chunk_size, to, sender);
+        // TODO: error handling
+        if (status < 0)
+            return status;
+        bytes_sent += chunk_size;
+    }
 
     return 0;
 }

@@ -4,6 +4,7 @@
 
 #include <sys/socket.h>
 #include <netinet/in.h>
+#include <string.h>
 
 #include <stdarg.h>
 #include <stddef.h>
@@ -61,6 +62,85 @@ static void test_rudp_send_succeeds_despite_message_loss(void** state) {
     set_recvfrom_buffer(recvfrom_buffer, buffer_len, RECVFROM_SUCCESS);
 
     int result = rudp_send(buffer, 100, &socket_info, &sender);
+    assert_int_equal(result, 0);
+    assert_int_equal(sender.last_ack, 1);
+}
+
+static void test_rudp_send_large_message(void** state) {
+    char buffer[MAX_DATA_SIZE+1] = {0,};
+    int buffer_len = MAX_DATA_SIZE+1;
+    char chunk_1_value = 0x41;
+    char chunk_2_value = 0x42;
+    memset(buffer, chunk_1_value, buffer_len-1);
+    buffer[buffer_len-1] = chunk_2_value;
+
+    struct sockaddr_in addr = {.sin_port=8080, .sin_addr=0x7F000001, .sin_family=AF_INET};
+    SocketInfo socket_info = {.addr=(struct sockaddr*) &addr, .addr_len=sizeof(addr), .sockfd=999};
+    RudpSender sender = {.last_ack=0, .message_timeout=INITIAL_TIMEOUT, .sender_timeout=SENDER_TIMEOUT};
+
+    // mocked responses
+    will_return_count(poll, POLL_READY, 2);
+
+    // mocked recvfrom response
+    RudpHeader received_headers[2] = {
+            {.ack_num=1},
+            {.ack_num=2},
+    };
+    char* received_buffers[2] = {
+            (char[MAX_PAYLOAD_SIZE]) {0,},
+            (char[MAX_PAYLOAD_SIZE]) {0,},
+    };
+    for (int i = 0; i < 2; i++) {
+        int serialized = serialize_header(&received_headers[i], received_buffers[i], MAX_PAYLOAD_SIZE);
+        set_recvfrom_buffer(received_buffers[i], serialized, RECVFROM_SUCCESS);
+    }
+
+    RudpMessage expected_sent_messages[2] = {
+            {.header= (RudpHeader) {.seq_num=1, .ack_num=0, .data_size=MAX_DATA_SIZE}, .data=buffer},
+            {.header= (RudpHeader) {.seq_num=2, .ack_num=0, .data_size=buffer_len-MAX_DATA_SIZE}, .data=(&buffer[MAX_DATA_SIZE])},
+    };
+    // sanity check
+    assert_memory_equal(&buffer[MAX_DATA_SIZE-1], &chunk_1_value, 1);
+    assert_memory_equal(&buffer[MAX_DATA_SIZE], &chunk_2_value, 1);
+    char* expected_sent_buffers[2] = {
+            (char[MAX_PAYLOAD_SIZE]) {0,},
+            (char[MAX_PAYLOAD_SIZE]) {0,},
+    };
+    for (int i = 0; i < 2; i++) {
+        int serialized = serialize(&expected_sent_messages[i], expected_sent_buffers[i], MAX_PAYLOAD_SIZE);
+        check_sendto(expected_sent_buffers[i], serialized, SENDTO_SUCCESS);
+    }
+
+    int result = rudp_send(buffer, buffer_len, &socket_info, &sender);
+    assert_int_equal(result, 0);
+    assert_int_equal(sender.last_ack, 2);
+}
+
+static void test_rudp_send_MAX_DATA_SIZE_message(void** state) {
+    char buffer[MAX_DATA_SIZE] = {0,};
+    int buffer_len = MAX_DATA_SIZE;
+    memset(buffer, 0x41, buffer_len-1);
+
+    struct sockaddr_in addr = {.sin_port=8080, .sin_addr=0x7F000001, .sin_family=AF_INET};
+    SocketInfo socket_info = {.addr=(struct sockaddr*) &addr, .addr_len=sizeof(addr), .sockfd=999};
+    RudpSender sender = {.last_ack=0, .message_timeout=INITIAL_TIMEOUT, .sender_timeout=SENDER_TIMEOUT};
+
+    // mocked responses
+    set_poll_rc(POLL_READY);
+
+    // mocked recvfrom response
+    RudpHeader recvfrom_header = {.ack_num=1};
+    char recvfrom_buffer[MAX_PAYLOAD_SIZE] = {0,};
+    int serialized = serialize_header(&recvfrom_header, recvfrom_buffer, MAX_PAYLOAD_SIZE);
+    set_recvfrom_buffer(recvfrom_buffer, serialized, RECVFROM_SUCCESS);
+
+    RudpMessage expected_sent_message = {.header= (RudpHeader) {.seq_num=1, .ack_num=0, .data_size=MAX_DATA_SIZE},
+                                         .data=buffer};
+    char expected_sent_buffer[MAX_PAYLOAD_SIZE] = {0,};
+    serialized = serialize(&expected_sent_message, expected_sent_buffer, MAX_PAYLOAD_SIZE);
+    check_sendto(expected_sent_buffer, serialized, SENDTO_SUCCESS);
+
+    int result = rudp_send(buffer, buffer_len, &socket_info, &sender);
     assert_int_equal(result, 0);
     assert_int_equal(sender.last_ack, 1);
 }
@@ -188,6 +268,8 @@ int main(void) {
     const struct CMUnitTest tests[] = {
             cmocka_unit_test(test_rudp_send_succeeds_with_ack),
             cmocka_unit_test(test_rudp_send_succeeds_despite_message_loss),
+            cmocka_unit_test(test_rudp_send_large_message),
+            cmocka_unit_test(test_rudp_send_MAX_DATA_SIZE_message),
             cmocka_unit_test(test_rudp_send_eventually_times_out),
             cmocka_unit_test(test_rudp_recv_acks_on_receipt),
             cmocka_unit_test(test_rudp_recv_acks_previous_requests),
