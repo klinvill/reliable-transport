@@ -89,3 +89,42 @@ int rudp_send(char* data, int data_size, SocketInfo* to, RudpSender* sender) {
 
     return 0;
 }
+
+int rudp_recv(char* buffer, int buffer_size, SocketInfo* from, RudpReceiver* receiver) {
+    while (1) {
+        int n = recvfrom(from->sockfd, buffer, buffer_size, 0, from->addr, &from->addr_len);
+        // TODO: error handling
+        if (n < 0)
+            return n;
+
+        RudpMessage received_message = {};
+        int deserialized = deserialize(buffer, buffer_size, &received_message);
+        // TODO: error handling
+        if (deserialized < 0)
+            return deserialized;
+
+        // To cover the case where an ack for a previous message has been sent that the receiver hasn't received, we
+        // simply reply with an ACK for any message that has a sequence number within the ACK_WINDOW preceding our last
+        // received sequence number
+        if (received_message.header.seq_num == receiver->last_received + 1
+            || (0 <= (receiver->last_received - received_message.header.seq_num)
+                && (receiver->last_received - received_message.header.seq_num) < ACK_WINDOW)) {
+            RudpMessage ack_message = {.header = (RudpHeader) {.ack_num=received_message.header.seq_num, .data_size=0}};
+
+            char wire_data[MAX_PAYLOAD_SIZE] = {0,};
+            int wire_data_len = serialize(&ack_message, wire_data, MAX_PAYLOAD_SIZE);
+            if (wire_data_len < 0)
+                return wire_data_len;
+
+            int status = sendto(from->sockfd, wire_data, wire_data_len, 0, from->addr, from->addr_len);
+            // TODO: error handling
+            if (status < 0)
+                return status;
+
+            if (received_message.header.seq_num == receiver->last_received + 1) {
+                receiver->last_received++;
+                return 0;
+            }
+        }
+    }
+}

@@ -35,4 +35,8 @@ typedef struct {
     int sender_timeout;
 } RudpSender;
 
+typedef struct {
+    int last_received;
+} RudpReceiver;
+
 #endif //UDP_TYPES_H

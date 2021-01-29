@@ -65,6 +65,7 @@ static void test_rudp_send_succeeds_despite_message_loss(void** state) {
     assert_int_equal(sender.last_ack, 1);
 }
 
+// TODO: do we really need a timeout for the sender? (for this assignment)
 static void test_rudp_send_eventually_times_out(void** state) {
     char buffer[100] = {0,};
     struct sockaddr_in addr = {.sin_port=8080, .sin_addr=0x7F000001, .sin_family=AF_INET};
@@ -79,11 +80,118 @@ static void test_rudp_send_eventually_times_out(void** state) {
     assert_int_equal(sender.last_ack, 0);
 }
 
+static void test_rudp_recv_acks_on_receipt(void** state) {
+    char buffer[100] = {0,};
+    int buffer_len = 100;
+    struct sockaddr_in addr = {.sin_port=8080, .sin_addr=0x7F000001, .sin_family=AF_INET};
+    SocketInfo socket_info = {.addr=(struct sockaddr*) &addr, .addr_len=sizeof(addr), .sockfd=999};
+    RudpReceiver receiver = {.last_received=0};
+
+    // mocked recvfrom message
+    RudpHeader recvfrom_header = {.seq_num=1};
+    char recvfrom_buffer[100] = {0,};
+    serialize_header(&recvfrom_header, recvfrom_buffer, buffer_len);
+    set_recvfrom_buffer(recvfrom_buffer, buffer_len, RECVFROM_SUCCESS);
+
+    RudpHeader expected_sent_header = {.seq_num=0, .ack_num=1, .data_size=0};
+    char expected_sent_buffer[100] = {0,};
+    int serialized = serialize_header(&expected_sent_header, expected_sent_buffer, buffer_len);
+    // mocks sendto, but also checks that the buffer sendto received is equal to expected_sent_buffer
+    check_sendto(expected_sent_buffer, serialized, SENDTO_SUCCESS);
+
+    int result = rudp_recv(buffer, buffer_len, &socket_info, &receiver);
+
+    assert_int_equal(result, 0);
+    assert_int_equal(receiver.last_received, 1);
+}
+
+static void test_rudp_recv_acks_previous_requests(void** state) {
+    char buffer[100] = {0,};
+    int buffer_len = 100;
+    struct sockaddr_in addr = {.sin_port=8080, .sin_addr=0x7F000001, .sin_family=AF_INET};
+    SocketInfo socket_info = {.addr=(struct sockaddr*) &addr, .addr_len=sizeof(addr), .sockfd=999};
+    RudpReceiver receiver = {.last_received=1};
+
+    // mocked recvfrom messages
+    //
+    // the receiver will keep listening until they receive the next packet they're looking for, so to avoid a timeout
+    // we send the next sequence they're expecting
+    RudpHeader received_headers[2] = {
+            {.seq_num=1},
+            {.seq_num=2},
+    };
+    char* received_buffers[2] = {
+            (char[100]) {0,},
+            (char[100]) {0,},
+    };
+    for (int i = 0; i < 2; i++) {
+        int serialized = serialize_header(&received_headers[i], received_buffers[i], buffer_len);
+        set_recvfrom_buffer(received_buffers[i], serialized, RECVFROM_SUCCESS);
+    }
+
+    RudpHeader expected_sent_headers[2] = {
+            {.seq_num=0, .ack_num=1, .data_size=0},
+            {.seq_num=0, .ack_num=2, .data_size=0},
+    };
+    char* expected_sent_buffers[2] = {
+            (char[100]) {0,},
+            (char[100]) {0,},
+    };
+    for (int i = 0; i < 2; i++) {
+        int serialized = serialize_header(&expected_sent_headers[i], expected_sent_buffers[i], buffer_len);
+        check_sendto(expected_sent_buffers[i], serialized, SENDTO_SUCCESS);
+    }
+
+    int result = rudp_recv(buffer, buffer_len, &socket_info, &receiver);
+
+    assert_int_equal(result, 0);
+    assert_int_equal(receiver.last_received, 2);
+}
+
+static void test_rudp_recv_does_not_ack_future_requests(void** state) {
+    char buffer[100] = {0,};
+    int buffer_len = 100;
+    struct sockaddr_in addr = {.sin_port=8080, .sin_addr=0x7F000001, .sin_family=AF_INET};
+    SocketInfo socket_info = {.addr=(struct sockaddr*) &addr, .addr_len=sizeof(addr), .sockfd=999};
+    RudpReceiver receiver = {.last_received=0};
+
+    // mocked recvfrom messages
+    //
+    // the receiver will keep listening until they receive the next packet they're looking for, so to avoid a timeout
+    // we send the next sequence they're expecting
+    RudpHeader received_headers[2] = {
+            {.seq_num=2},
+            {.seq_num=1},
+    };
+    char* received_buffers[2] = {
+            (char[100]) {0,},
+            (char[100]) {0,},
+    };
+    for (int i = 0; i < 2; i++) {
+        int serialized = serialize_header(&received_headers[i], received_buffers[i], buffer_len);
+        set_recvfrom_buffer(received_buffers[i], serialized, RECVFROM_SUCCESS);
+    }
+
+    RudpHeader expected_sent_header ={.seq_num=0, .ack_num=1, .data_size=0};
+    char expected_sent_buffer[100] = {0,};
+    int serialized = serialize_header(&expected_sent_header, expected_sent_buffer, buffer_len);
+    check_sendto(expected_sent_buffer, serialized, SENDTO_SUCCESS);
+
+    int result = rudp_recv(buffer, buffer_len, &socket_info, &receiver);
+
+    assert_int_equal(result, 0);
+    assert_int_equal(receiver.last_received, 1);
+}
+
+
 int main(void) {
     const struct CMUnitTest tests[] = {
             cmocka_unit_test(test_rudp_send_succeeds_with_ack),
             cmocka_unit_test(test_rudp_send_succeeds_despite_message_loss),
             cmocka_unit_test(test_rudp_send_eventually_times_out),
+            cmocka_unit_test(test_rudp_recv_acks_on_receipt),
+            cmocka_unit_test(test_rudp_recv_acks_previous_requests),
+            cmocka_unit_test(test_rudp_recv_does_not_ack_future_requests),
     };
 
     return cmocka_run_group_tests(tests, NULL, NULL);

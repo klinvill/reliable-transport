@@ -13,10 +13,14 @@
 #define INITIAL_TIMEOUT 200     // in milliseconds, timeout until a message will be resent
 #define SENDER_TIMEOUT 5000     // in milliseconds, timeout until a message is considered impossible to deliver
 
+// if a receiver sees a message with a sequence number <= it's last received sequence number, it will still send an
+// ack if the difference is within the ack window
+#define ACK_WINDOW 100
+
 
 // sends data as a single UDP message
 int rudp_send(char* data, int data_size, SocketInfo* to, RudpSender* sender);
-void rudp_recv(char* buffer, SocketInfo* from);
+int rudp_recv(char* buffer, int buffer_size, SocketInfo* from, RudpReceiver* receiver);
 
 // Special cases that will send or receive the contents of a file in a streaming manner
 // Reads the contents of the file specified by read_fd, and then sends it to the socket specified by to
