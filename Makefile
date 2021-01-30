@@ -24,8 +24,8 @@ end_to_end_tests:
 unit_tests: test_utils test_reliable_udp test_kftp
 	./out/tests/common/test_utils
 	./out/tests/common/reliable_udp/test_serde
-	DYLD_INSERT_LIBRARIES=./out/tests/mocks/mocks.dylib DYLD_FORCE_FLAT_NAMESPACE=1 ./out/tests/common/reliable_udp/test_reliable_udp
-	DYLD_INSERT_LIBRARIES=./out/tests/mocks/reliable_udp_mocks.dylib:./out/tests/mocks/mocks.dylib DYLD_FORCE_FLAT_NAMESPACE=1 ./out/tests/common/kftp/test_kftp
+	DYLD_INSERT_LIBRARIES=./out/tests/mocks/mocks.dylib DYLD_FORCE_FLAT_NAMESPACE=1 lldb ./out/tests/common/reliable_udp/test_reliable_udp -o run -o quit
+	DYLD_INSERT_LIBRARIES=./out/tests/mocks/reliable_udp_mocks.dylib:./out/tests/mocks/mocks.dylib DYLD_FORCE_FLAT_NAMESPACE=1 lldb ./out/tests/common/kftp/test_kftp -o run -o quit
 
 test_utils: .c.o
 	mkdir -p out/tests/common

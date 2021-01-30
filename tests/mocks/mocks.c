@@ -146,6 +146,14 @@ void set_fread_buffer(char* buffer, size_t buff_size, size_t ret_val) {
     will_return(fread, ret_val);
 }
 
+void check_fwrite(char* expected_buffer, size_t buff_size, ssize_t ret_code) {
+    expect_value(fwrite, size, sizeof(char));
+    expect_value(fwrite, nitems, buff_size);
+    expect_memory(fwrite, ptr, expected_buffer, buff_size);
+
+    will_return(fwrite, ret_code);
+}
+
 int fseek(FILE *stream, long offset, int whence) {
     return mock_type(int);
 }
@@ -165,6 +173,14 @@ size_t fread(void *restrict ptr, size_t size, size_t nitems, FILE *restrict stre
         return 0;
 
     memcpy(ptr, in_buffer, in_buffer_len);
+
+    return mock_type(size_t);
+}
+
+size_t fwrite(const void *restrict ptr, size_t size, size_t nitems, FILE *restrict stream) {
+    check_expected(size);
+    check_expected(nitems);
+    check_expected(ptr);
 
     return mock_type(size_t);
 }

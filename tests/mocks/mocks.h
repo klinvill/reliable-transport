@@ -19,6 +19,7 @@ int fseek(FILE *stream, long offset, int whence);
 long ftell(FILE *stream);
 int feof(FILE *stream);
 size_t fread(void *restrict ptr, size_t size, size_t nitems, FILE *restrict stream);
+size_t fwrite(const void *restrict ptr, size_t size, size_t nitems, FILE *restrict stream);
 
 // helper functions to wrap expected cmocka arguments
 void set_sendto_rc(ssize_t ret_code);
@@ -36,5 +37,7 @@ void check_recvfrom(char* expected_buffer, size_t buff_size, ssize_t ret_code);
 void set_poll_rc(ssize_t ret_code);
 
 void set_fread_buffer(char* buffer, size_t buff_size, size_t ret_val);
+
+void check_fwrite(char* expected_buffer, size_t buff_size, ssize_t ret_code);
 
 #endif //UDP_MOCKS_H
