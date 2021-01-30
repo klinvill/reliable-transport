@@ -263,6 +263,33 @@ static void test_rudp_recv_does_not_ack_future_requests(void** state) {
     assert_int_equal(receiver.last_received, 1);
 }
 
+static void test_rudp_recv_puts_data_in_buffer(void** state) {
+    char buffer[100] = {0,};
+    int buffer_len = 100;
+    SocketInfo socket_info = {};
+    RudpReceiver receiver = {.last_received=0};
+    char* test_string = "hello world!";
+
+    // mocked recvfrom message
+    RudpHeader recvfrom_header = {.seq_num=1, .data_size=strlen(test_string)+1};
+    char recvfrom_buffer[100] = {};
+    int serialized = serialize_header(&recvfrom_header, recvfrom_buffer, buffer_len);
+    strcpy(&recvfrom_buffer[serialized], test_string);
+    set_recvfrom_buffer(recvfrom_buffer, buffer_len, RECVFROM_SUCCESS);
+
+    RudpHeader expected_sent_header = {.seq_num=0, .ack_num=1, .data_size=0};
+    char expected_sent_buffer[100] = {};
+    serialized = serialize_header(&expected_sent_header, expected_sent_buffer, buffer_len);
+    // mocks sendto, but also checks that the buffer sendto received is equal to expected_sent_buffer
+    check_sendto(expected_sent_buffer, serialized, SENDTO_SUCCESS);
+
+    int result = rudp_recv(buffer, buffer_len, &socket_info, &receiver);
+
+    assert_int_equal(result, strlen(test_string)+1);
+    assert_int_equal(receiver.last_received, 1);
+    assert_string_equal(buffer, test_string);
+}
+
 
 int main(void) {
     const struct CMUnitTest tests[] = {
@@ -274,6 +301,7 @@ int main(void) {
             cmocka_unit_test(test_rudp_recv_acks_on_receipt),
             cmocka_unit_test(test_rudp_recv_acks_previous_requests),
             cmocka_unit_test(test_rudp_recv_does_not_ack_future_requests),
+            cmocka_unit_test(test_rudp_recv_puts_data_in_buffer),
     };
 
     return cmocka_run_group_tests(tests, NULL, NULL);

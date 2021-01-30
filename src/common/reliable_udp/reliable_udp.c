@@ -7,6 +7,9 @@
 #include <stdbool.h>
 #include <sys/time.h>
 #include <poll.h>
+#include <string.h>
+#include <assert.h>
+#include <stdlib.h>
 
 #include "serde.h"
 #include "types.h"
@@ -109,6 +112,53 @@ int rudp_send(char* data, int data_size, SocketInfo* to, RudpSender* sender) {
     return 0;
 }
 
+// deserialized messages have a dynamically allocated data buffer that needs to be freed
+int rudp_handle_received_message(RudpMessage* received_message, char* buffer, int buffer_size, SocketInfo* from, RudpReceiver* receiver) {
+    int ret_code = 0;
+
+    // TODO: error handling
+    if (received_message->header.data_size > buffer_size) {
+        ret_code = -1;
+        goto dealloc;
+    }
+
+    // To cover the case where an ack for a previous message has been sent that the receiver hasn't received, we
+    // simply reply with an ACK for any message that has a sequence number within the ACK_WINDOW preceding our last
+    // received sequence number
+    if (received_message->header.seq_num == receiver->last_received + 1
+        || (0 <= (receiver->last_received - received_message->header.seq_num)
+            && (receiver->last_received - received_message->header.seq_num) < ACK_WINDOW)) {
+        RudpMessage ack_message = {.header = (RudpHeader) {.ack_num=received_message->header.seq_num, .data_size=0}};
+
+        char wire_data[MAX_PAYLOAD_SIZE] = {0,};
+        int wire_data_len = serialize(&ack_message, wire_data, MAX_PAYLOAD_SIZE);
+        if (wire_data_len < 0) {
+            ret_code = wire_data_len;
+            goto dealloc;
+        }
+
+        int status = sendto(from->sockfd, wire_data, wire_data_len, 0, from->addr, from->addr_len);
+        // TODO: error handling
+        if (status < 0) {
+            ret_code = status;
+            goto dealloc;
+        }
+
+        if (received_message->header.seq_num == receiver->last_received + 1) {
+            receiver->last_received++;
+            assert(buffer_size >= received_message->header.data_size);
+            memcpy(buffer, received_message->data, received_message->header.data_size);
+            ret_code = received_message->header.data_size;
+            goto dealloc;
+        }
+    }
+
+dealloc:
+    free(received_message->data);
+
+    return ret_code;
+}
+
 int rudp_recv(char* buffer, int buffer_size, SocketInfo* from, RudpReceiver* receiver) {
     while (1) {
         int n = recvfrom(from->sockfd, buffer, buffer_size, 0, from->addr, &from->addr_len);
@@ -122,28 +172,10 @@ int rudp_recv(char* buffer, int buffer_size, SocketInfo* from, RudpReceiver* rec
         if (deserialized < 0)
             return deserialized;
 
-        // To cover the case where an ack for a previous message has been sent that the receiver hasn't received, we
-        // simply reply with an ACK for any message that has a sequence number within the ACK_WINDOW preceding our last
-        // received sequence number
-        if (received_message.header.seq_num == receiver->last_received + 1
-            || (0 <= (receiver->last_received - received_message.header.seq_num)
-                && (receiver->last_received - received_message.header.seq_num) < ACK_WINDOW)) {
-            RudpMessage ack_message = {.header = (RudpHeader) {.ack_num=received_message.header.seq_num, .data_size=0}};
-
-            char wire_data[MAX_PAYLOAD_SIZE] = {0,};
-            int wire_data_len = serialize(&ack_message, wire_data, MAX_PAYLOAD_SIZE);
-            if (wire_data_len < 0)
-                return wire_data_len;
-
-            int status = sendto(from->sockfd, wire_data, wire_data_len, 0, from->addr, from->addr_len);
-            // TODO: error handling
-            if (status < 0)
-                return status;
-
-            if (received_message.header.seq_num == receiver->last_received + 1) {
-                receiver->last_received++;
-                return 0;
-            }
-        }
+        int last_received = receiver->last_received;
+        // frees received_message's dynamically allocated data buffer before exiting
+        int status = rudp_handle_received_message(&received_message, buffer, buffer_size, from, receiver);
+        if (status < 0 || receiver->last_received == last_received + 1)
+            return status;
     }
 }
