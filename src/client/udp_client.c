@@ -27,17 +27,17 @@ void error(char *msg) {
 
 typedef struct {
     int sockfd;
-    struct sockaddr* serveraddr;
+    struct sockaddr *serveraddr;
     socklen_t serverlen;
 } SocketInfo;
 
-void handle_response(SocketInfo* sock_info) {
+void handle_response(SocketInfo *sock_info) {
     int n = 0;
     char buf[BUFSIZE];
 
     bool did_recv_any = false;
 
-    while((n = recvfrom(sock_info->sockfd, buf, BUFSIZE, 0, sock_info->serveraddr, &sock_info->serverlen)) > 0) {
+    while ((n = recvfrom(sock_info->sockfd, buf, BUFSIZE, 0, sock_info->serveraddr, &sock_info->serverlen)) > 0) {
         did_recv_any = true;
         buf[n] = 0;
         printf("%s", buf);
@@ -62,8 +62,8 @@ int main(int argc, char **argv) {
 
     /* check command line arguments */
     if (argc != 3) {
-       fprintf(stderr,"usage: %s <hostname> <port>\n", argv[0]);
-       exit(0);
+        fprintf(stderr, "usage: %s <hostname> <port>\n", argv[0]);
+        exit(0);
     }
     hostname = argv[1];
     portno = atoi(argv[2]);
@@ -74,27 +74,27 @@ int main(int argc, char **argv) {
     recv_timeout.tv_usec = RECV_TIMEOUT;
     if (setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, &recv_timeout, sizeof(recv_timeout)))
         error("ERROR setting receive timout for socket");
-    if (sockfd < 0) 
+    if (sockfd < 0)
         error("ERROR opening socket");
 
     /* gethostbyname: get the server's DNS entry */
     server = gethostbyname(hostname);
     if (server == NULL) {
-        fprintf(stderr,"ERROR, no such host as %s\n", hostname);
+        fprintf(stderr, "ERROR, no such host as %s\n", hostname);
         exit(0);
     }
 
     /* build the server's Internet address */
     bzero((char *) &serveraddr, sizeof(serveraddr));
     serveraddr.sin_family = AF_INET;
-    bcopy((char *)server->h_addr, 
-	  (char *)&serveraddr.sin_addr.s_addr, server->h_length);
+    bcopy((char *) server->h_addr,
+          (char *) &serveraddr.sin_addr.s_addr, server->h_length);
     serveraddr.sin_port = htons(portno);
 
     serverlen = sizeof(serveraddr);
-    SocketInfo sock_info = {.sockfd=sockfd, .serveraddr=(struct sockaddr*) &serveraddr, .serverlen=serverlen};
+    SocketInfo sock_info = {.sockfd=sockfd, .serveraddr=(struct sockaddr *) &serveraddr, .serverlen=serverlen};
 
-    while(1) {
+    while (1) {
         /* get a message from the user */
         bzero(buf, BUFSIZE);
         printf("Please enter one of the following messages: \n"
@@ -108,7 +108,7 @@ int main(int argc, char **argv) {
         fgets(buf, BUFSIZE, stdin);
 
         /* send the message to the server */
-        n = sendto(sockfd, buf, strlen(buf), 0, (struct sockaddr*) &serveraddr, serverlen);
+        n = sendto(sockfd, buf, strlen(buf), 0, (struct sockaddr *) &serveraddr, serverlen);
         if (n < 0)
             error("ERROR in sendto");
 
