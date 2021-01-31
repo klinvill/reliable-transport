@@ -9,6 +9,91 @@ address = "127.0.0.1"
 port = 8080
 resources_filepath = Path("tests/resources/")
 
+class RudpHeader:
+    def __init__(self, seq_num: int, ack_num: int, data_size: int):
+        self.seq_num = seq_num
+        self.ack_num = ack_num
+        self.data_size = data_size
+
+    def serialize(self) -> bytes:
+        return (self.seq_num.to_bytes(4, "big", signed=True)
+                + self.ack_num.to_bytes(4, "big", signed=True)
+                + self.data_size.to_bytes(4, "big", signed=True)
+                )
+
+    @staticmethod
+    def deserialize(data: bytes):
+        assert len(data) >= 12
+        return RudpHeader(int.from_bytes(data[0:4], "big", signed=True),
+                          int.from_bytes(data[4:8], "big", signed=True),
+                          int.from_bytes(data[8:12], "big", signed=True))
+
+
+class RudpMessage:
+    def __init__(self, header: RudpHeader, data: bytes):
+        self.header = header
+        self.data = data
+        assert header.data_size == len(data)
+
+    def serialize(self) -> bytes:
+        return self.header.serialize() + self.data
+
+    @staticmethod
+    def deserialize(data: bytes):
+        header = RudpHeader.deserialize(data)
+        assert header.data_size == len(data[12:])
+        return RudpMessage(header, data[12:])
+
+
+class RudpSender:
+    BUFSIZE = 1024
+
+    def __init__(self, sock: socket.socket, last_ack: int = 0):
+        self.sock = sock
+        self.last_ack = last_ack
+
+    def send(self, data: bytes):
+        message = RudpMessage(RudpHeader(self.last_ack + 1, 0, len(data)), data)
+        self.sock.sendto(message.serialize(), (address, port))
+
+        acked = False
+        while not acked:
+            (data, addr) = self.sock.recvfrom(self.BUFSIZE)
+            if addr == (address, port):
+                recv_message = RudpMessage.deserialize(data)
+                if recv_message.header.ack_num == self.last_ack + 1:
+                    self.last_ack += 1
+                    acked = True
+
+
+class RudpReceiver:
+    BUFSIZE = 1024
+
+    def __init__(self, sock: socket.socket, last_received: int = 0):
+        self.sock = sock
+        self.last_received = last_received
+
+    def receive(self) -> bytes:
+        full_data = b''
+        while True:
+            try:
+                (data, addr) = self.sock.recvfrom(self.BUFSIZE)
+            except socket.timeout:
+                break
+            if addr == (address, port):
+                recv_message = RudpMessage.deserialize(data)
+                if recv_message.header.seq_num == self.last_received + 1:
+                    self.last_received += 1
+                    full_data += recv_message.data
+                    self.send_ack(recv_message.header.seq_num)
+
+        return full_data
+
+    def send_ack(self, ack_num: int):
+        message = RudpMessage(RudpHeader(0, ack_num, 0), b'')
+        self.sock.sendto(message.serialize(), (address, port))
+
+
 class Client:
     BUFSIZE = 1024
     SOCKET_TIMEOUT = 0.1    # in seconds
@@ -16,6 +101,8 @@ class Client:
     def __init__(self, sock: socket.socket):
         sock.settimeout(self.SOCKET_TIMEOUT)
         self.sock = sock
+        self.sender = RudpSender(self.sock)
+        self.receiver = RudpReceiver(self.sock)
 
     def get(self, filename: str) -> bytes:
         return self.send_and_receive(f"get {filename}".encode())
@@ -33,19 +120,10 @@ class Client:
         return self.send_and_receive(b"exit")
 
     def send(self, data: bytes):
-        self.sock.sendto(data, (address, port))
+        self.sender.send(data)
 
     def receive(self) -> bytes:
-        full_data = b''
-        while True:
-            try:
-                (data, addr) = self.sock.recvfrom(self.BUFSIZE)
-            except socket.timeout:
-                break
-            if addr == (address, port):
-                full_data += data
-
-        return full_data
+        return self.receiver.receive()
 
     def send_and_receive(self, data: bytes) -> bytes:
         self.send(data)
@@ -86,7 +164,7 @@ class TestResponses:
     delete_message = b"Deleted file\n"
 
 
-@pytest.mark.usefixtures("server")
+@pytest.mark.usefixtures("killable_server")
 class TestServerNonExiting(TestResponses):
     def test_get(self, client: Client):
         filepath = resources_filepath.joinpath("foo1")

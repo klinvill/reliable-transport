@@ -4,9 +4,9 @@ client: src/client/udp_client.c
 	mkdir -p out/client
 	gcc src/client/udp_client.c -o out/client/client
 
-server: src/server/udp_server.c
+server: src/server/udp_server.c .c.o
 	mkdir -p out/server
-	gcc src/server/udp_server.c -o out/server/server
+	gcc src/server/udp_server.c -o out/server/server out/common/reliable_udp/reliable_udp.o out/common/reliable_udp/serde.o out/common/utils.o
 
 .c.o: src/common/utils.c src/common/reliable_udp/serde.c src/common/reliable_udp/reliable_udp.c src/common/kftp/kftp.c
 	mkdir -p out/common/reliable_udp out/common/kftp

@@ -8,20 +8,21 @@
 #include <stdlib.h>
 #include <string.h>
 #include <netdb.h>
-#include <sys/types.h> 
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <dirent.h>
 #include <sys/stat.h>
 
+#include "../common/reliable_udp/reliable_udp.h"
+
 #define BUFSIZE 1024
 #define MAX_FILES 100
 
 #define DELIMITERS " \n\t\r\v\f"
 
-#define PARSE_ERROR -1
-#define NOT_IMPLEMENTED_ERROR -2
+#define PARSE_ERROR -2
+#define NOT_IMPLEMENTED_ERROR -3
 
 
 /*
@@ -32,11 +33,6 @@ void error(char *msg) {
     exit(1);
 }
 
-typedef struct {
-    int sockfd;
-    struct sockaddr* clientaddr;
-    socklen_t clientlen;
-} SocketInfo;
 
 typedef struct {
     int count;
@@ -83,16 +79,16 @@ Filenames ls_files(char* directory) {
     return (Filenames) {.count=i, .files=files};
 }
 
-int do_send(char* message, const SocketInfo* socket_info) {
-    int status = sendto(socket_info->sockfd, message, strlen(message), 0, socket_info->clientaddr,
-                        socket_info->clientlen);
+// TODO: which parameters (for all the functions) should be const?
+int do_send(char* message, SocketInfo* socket_info, RudpSender* sender) {
+    int status = rudp_send(message, strlen(message), socket_info, sender);
     if (status < 0)
         error("ERROR in sendto");
 
     return status;
 }
 
-void send_error(int errno, char* command, const SocketInfo* socket_info) {
+void send_error(int errno, char* command, SocketInfo* socket_info, RudpSender* sender) {
     char err_buff[BUFSIZE] = {0,};
 
     switch (errno) {
@@ -106,11 +102,11 @@ void send_error(int errno, char* command, const SocketInfo* socket_info) {
             snprintf(err_buff, BUFSIZE, "Unrecognized error code: %d", errno);
     }
 
-    do_send(err_buff, socket_info);
+    do_send(err_buff, socket_info, sender);
 }
 
 // Commands, prefixed with do_ to avoid name collisions (e.g. with exit())
-int do_get(char* filename, SocketInfo* socket_info) {
+int do_get(char* filename, SocketInfo* socket_info, RudpSender* sender) {
     FILE* f = fopen(filename, "r");
     if(f == NULL)
         error("Could not open file for reading");
@@ -121,7 +117,7 @@ int do_get(char* filename, SocketInfo* socket_info) {
 
     while((bytes_read = fread(buffer, sizeof(char), BUFSIZE-1, f)) > 0) {
         buffer[bytes_read] = 0;
-        ret_code = do_send(buffer, socket_info);
+        ret_code = do_send(buffer, socket_info, sender);
         // TODO: what should I return for ret_code? Right now it's just tracking the last number of bytes read
         if (ret_code < 0)
             break;
@@ -131,15 +127,15 @@ int do_get(char* filename, SocketInfo* socket_info) {
 }
 int do_put(char* filename) { return NOT_IMPLEMENTED_ERROR; }
 
-int do_delete(char* filename, SocketInfo* socket_info) {
+int do_delete(char* filename, SocketInfo* socket_info, RudpSender* sender) {
     // According to given spec, we should do nothing if the file does not exist
     if (unlink(filename) == 0)
-        return do_send("Deleted file\n", socket_info);
+        return do_send("Deleted file\n", socket_info, sender);
 
     return 0;
 }
 
-int do_ls(SocketInfo* socket_info) {
+int do_ls(SocketInfo* socket_info, RudpSender* sender) {
     Filenames filenames = ls_files(".");
     char message[BUFSIZE] = {0,};
 
@@ -153,7 +149,7 @@ int do_ls(SocketInfo* socket_info) {
             error("The filenames are too large to all fit into the buffer");
         }
     }
-    int ret_code = do_send(message, socket_info);
+    int ret_code = do_send(message, socket_info, sender);
 
     // ls_files() allocates memory that needs to be freed
     cleanup_filenames(&filenames);
@@ -162,15 +158,15 @@ int do_ls(SocketInfo* socket_info) {
 }
 
 // does not return
-void do_exit(SocketInfo* socket_info) {
+void do_exit(SocketInfo* socket_info, RudpSender* sender) {
     char* exit_message = "Exiting gracefully";
-    do_send(exit_message, socket_info);
+    do_send(exit_message, socket_info, sender);
 
     close(socket_info->sockfd);
     exit(0);
 }
 
-int process_message(char* message, SocketInfo* socket_info) {
+int process_message(char* message, SocketInfo* socket_info, RudpSender* sender) {
     char* first_token = strtok(message, DELIMITERS);
     if(!first_token) return PARSE_ERROR;
 
@@ -182,9 +178,9 @@ int process_message(char* message, SocketInfo* socket_info) {
         if(second_token) return PARSE_ERROR;
 
         if(strcmp(first_token, "ls") == 0)
-            return do_ls(socket_info);
+            return do_ls(socket_info, sender);
         else if (strcmp(first_token, "exit") == 0)
-            do_exit(socket_info);
+            do_exit(socket_info, sender);
     }
 
     // double arg commands
@@ -195,11 +191,11 @@ int process_message(char* message, SocketInfo* socket_info) {
         if (strtok(NULL, DELIMITERS)) return PARSE_ERROR;
 
         if(strcmp(first_token, "get") == 0)
-            return do_get(second_token, socket_info);
+            return do_get(second_token, socket_info, sender);
         else if (strcmp(first_token, "put") == 0)
             return do_put(second_token);
         else if (strcmp(first_token, "delete") == 0)
-            return do_delete(second_token, socket_info);
+            return do_delete(second_token, socket_info, sender);
     }
 
     return PARSE_ERROR;
@@ -258,7 +254,10 @@ int main(int argc, char **argv) {
     error("ERROR on binding");
 
   clientlen = sizeof(clientaddr);
-  SocketInfo socket_info = {sockfd, (struct sockaddr *) &clientaddr, clientlen};
+  SocketInfo client_socket_info = {sockfd, (struct sockaddr *) &clientaddr, clientlen};
+
+  RudpReceiver receiver = {};
+  RudpSender sender = {};
 
   /* 
    * main loop: wait for a datagram, then echo it
@@ -270,10 +269,17 @@ int main(int argc, char **argv) {
      */
     bzero(buf, BUFSIZE);
     // TODO: should we instead receive BUFSIZE-1 since we generally treat the buffer as a string?
-    n = recvfrom(sockfd, buf, BUFSIZE, 0,
-		 (struct sockaddr *) &clientaddr, &clientlen);
+    n = rudp_recv(buf, BUFSIZE, &client_socket_info, &receiver);
+
     if (n < 0)
-      error("ERROR in recvfrom");
+      error("ERROR in rudp_recv");
+
+
+      // add zero to end of buffer since we treat it as a string
+      if (n < BUFSIZE && n > 0)
+          buf[n] = 0;
+      else
+          buf[BUFSIZE-1] = 0;
 
     /* 
      * gethostbyaddr: determine who sent the datagram
@@ -291,9 +297,9 @@ int main(int argc, char **argv) {
 
     char original_command[BUFSIZE] = {0,};
     strncpy(original_command, buf, BUFSIZE-1);
-    int status = process_message(buf, &socket_info);
+    int status = process_message(buf, &client_socket_info, &sender);
     if (status < 0) {
-        send_error(status, original_command, &socket_info);
+        send_error(status, original_command, &client_socket_info, &sender);
     }
   }
 }
