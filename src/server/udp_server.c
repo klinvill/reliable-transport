@@ -112,10 +112,20 @@ int do_get(char *filename, SocketInfo *socket_info, RudpSender *sender) {
     if (f == NULL)
         error("Could not open file for reading");
 
-    return kftp_send_file(f, socket_info, sender);
+    int result = kftp_send_file(f, socket_info, sender);
+    fclose(f);
+    return result;
 }
 
-int do_put(char *filename) { return NOT_IMPLEMENTED_ERROR; }
+int do_put(char *filename, SocketInfo *socket_info, RudpReceiver *receiver) {
+    FILE *f = fopen(filename, "w");
+    if (f == NULL)
+        error("Could not open file for reading");
+
+    int result = kftp_recv_file(f, socket_info, receiver);
+    fclose(f);
+    return result;
+}
 
 int do_delete(char *filename, SocketInfo *socket_info, RudpSender *sender) {
     // According to given spec, we should do nothing if the file does not exist
@@ -156,7 +166,7 @@ void do_exit(SocketInfo *socket_info, RudpSender *sender) {
     exit(0);
 }
 
-int process_message(char *message, SocketInfo *socket_info, RudpSender *sender) {
+int process_message(char *message, SocketInfo *socket_info, RudpSender *sender, RudpReceiver *receiver) {
     char *first_token = strtok(message, DELIMITERS);
     if (!first_token) return PARSE_ERROR;
 
@@ -183,7 +193,7 @@ int process_message(char *message, SocketInfo *socket_info, RudpSender *sender) 
         if (strcmp(first_token, "get") == 0)
             return do_get(second_token, socket_info, sender);
         else if (strcmp(first_token, "put") == 0)
-            return do_put(second_token);
+            return do_put(second_token, socket_info, receiver);
         else if (strcmp(first_token, "delete") == 0)
             return do_delete(second_token, socket_info, sender);
     }
@@ -287,7 +297,7 @@ int main(int argc, char **argv) {
 
         char original_command[BUFSIZE] = {0,};
         strncpy(original_command, buf, BUFSIZE - 1);
-        int status = process_message(buf, &client_socket_info, &sender);
+        int status = process_message(buf, &client_socket_info, &sender, &receiver);
         if (status < 0) {
             send_error(status, original_command, &client_socket_info, &sender);
         }

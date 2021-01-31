@@ -11,6 +11,8 @@ resources_filepath = Path("tests/resources/")
 
 
 class RudpHeader:
+    SIZE = 12
+
     def __init__(self, seq_num: int, ack_num: int, data_size: int):
         self.seq_num = seq_num
         self.ack_num = ack_num
@@ -31,6 +33,9 @@ class RudpHeader:
 
 
 class RudpMessage:
+    BUFSIZE = 1024
+    DATASIZE = BUFSIZE - RudpHeader.SIZE
+
     def __init__(self, header: RudpHeader, data: bytes):
         self.header = header
         self.data = data
@@ -47,6 +52,8 @@ class RudpMessage:
 
 
 class KftpHeader:
+    SIZE=4
+
     def __init__(self, data_size: int):
         self.data_size = data_size
 
@@ -60,8 +67,6 @@ class KftpHeader:
 
 
 class RudpSender:
-    BUFSIZE = 1024
-
     def __init__(self, sock: socket.socket, last_ack: int = 0):
         self.sock = sock
         self.last_ack = last_ack
@@ -72,7 +77,7 @@ class RudpSender:
 
         acked = False
         while not acked:
-            (data, addr) = self.sock.recvfrom(self.BUFSIZE)
+            (data, addr) = self.sock.recvfrom(RudpMessage.BUFSIZE)
             if addr == (address, port):
                 recv_message = RudpMessage.deserialize(data)
                 if recv_message.header.ack_num == self.last_ack + 1:
@@ -81,8 +86,6 @@ class RudpSender:
 
 
 class RudpReceiver:
-    BUFSIZE = 1024
-
     def __init__(self, sock: socket.socket, last_received: int = 0):
         self.sock = sock
         self.last_received = last_received
@@ -90,7 +93,7 @@ class RudpReceiver:
     def receive(self) -> bytes:
         while True:
             try:
-                (data, addr) = self.sock.recvfrom(self.BUFSIZE)
+                (data, addr) = self.sock.recvfrom(RudpMessage.BUFSIZE)
             except socket.timeout:
                 return b''
             if addr == (address, port):
@@ -103,6 +106,29 @@ class RudpReceiver:
     def send_ack(self, ack_num: int):
         message = RudpMessage(RudpHeader(0, ack_num, 0), b'')
         self.sock.sendto(message.serialize(), (address, port))
+
+
+class KftpSender:
+    def __init__(self, sender: RudpSender):
+        self.sender = sender
+
+    def send(self, file_data: bytes):
+        header = KftpHeader(len(file_data))
+        serialized_header = header.serialize()
+
+        if len(file_data) + len(serialized_header) > RudpMessage.DATASIZE:
+            offset = RudpMessage.DATASIZE - len(serialized_header)
+            first_message = serialized_header + file_data[:offset]
+            self.sender.send(first_message)
+
+            while offset < len(file_data):
+                next_message_size = min(len(file_data) - offset, RudpMessage.DATASIZE)
+                next_message = file_data[offset:offset+next_message_size]
+                self.sender.send(next_message)
+                offset += next_message_size
+
+        else:
+            self.sender.send(serialized_header + file_data)
 
 
 class KftpReceiver:
@@ -122,7 +148,6 @@ class KftpReceiver:
 
 
 class Client:
-    BUFSIZE = 1024
     SOCKET_TIMEOUT = 0.1    # in seconds
 
     def __init__(self, sock: socket.socket):
@@ -135,8 +160,9 @@ class Client:
         self.send(f"get {filename}".encode())
         return KftpReceiver(self.receiver).receive()
 
-    def put(self, filename: str) -> bytes:
-        return self.send_and_receive(f"put {filename}".encode())
+    def put(self, filename: str, data: bytes):
+        self.send(f"put {filename}".encode())
+        return KftpSender(self.sender).send(data)
 
     def delete(self, filename: str) -> bytes:
         return self.send_and_receive(f"delete {filename}".encode())
@@ -204,11 +230,17 @@ class TestServerNonExiting(TestResponses):
         expected_response = file_contents
         assert response == expected_response
 
-    def test_put_not_implemented(self, client: Client):
+    def test_put(self, client: Client):
+        test_contents = b"Hello world!\nGoodbye...\n"
         filepath = resources_filepath.joinpath("test.txt")
-        response = client.put(filepath)
-        expected_response = self.not_implemented_message_format.format(command=f"put {filepath}").encode()
-        assert response == expected_response
+        client.put(filepath, test_contents)
+
+        with open(filepath, "rb") as f:
+            file_contents = f.read()
+
+        assert file_contents == test_contents
+
+        Path(filepath).unlink()
 
     def test_delete(self, client: Client):
         filepath = resources_filepath.joinpath("test.txt")
