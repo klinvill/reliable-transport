@@ -78,9 +78,9 @@ int kftp_send_file(FILE* read_fp, SocketInfo* to, RudpSender* sender) {
 }
 
 int kftp_recv_file(FILE* write_fp, SocketInfo* from, RudpReceiver * receiver) {
-    char rudp_buffer[MAX_DATA_SIZE] = {};
+    char rudp_buffer[MAX_PAYLOAD_SIZE] = {};
 
-    int received_bytes = rudp_recv(rudp_buffer, MAX_DATA_SIZE, from, receiver);
+    int received_bytes = rudp_recv(rudp_buffer, MAX_PAYLOAD_SIZE, from, receiver);
     // TODO: error handling
     if (received_bytes < 0)
         return received_bytes;
@@ -101,7 +101,7 @@ int kftp_recv_file(FILE* write_fp, SocketInfo* from, RudpReceiver * receiver) {
         return -1;
 
     while(remaining_bytes > 0) {
-        received_bytes = rudp_recv(rudp_buffer, MAX_DATA_SIZE, from, receiver);
+        received_bytes = rudp_recv(rudp_buffer, MAX_PAYLOAD_SIZE, from, receiver);
         assert(received_bytes > 0);
         written_chunk_size = fwrite(rudp_buffer, sizeof(char), received_bytes, write_fp);
         // TODO: error handling

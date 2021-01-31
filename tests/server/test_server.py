@@ -77,9 +77,9 @@ class RudpSender:
 
         acked = False
         while not acked:
-            (data, addr) = self.sock.recvfrom(RudpMessage.BUFSIZE)
+            (recv_data, addr) = self.sock.recvfrom(RudpMessage.BUFSIZE)
             if addr == (address, port):
-                recv_message = RudpMessage.deserialize(data)
+                recv_message = RudpMessage.deserialize(recv_data)
                 if recv_message.header.ack_num == self.last_ack + 1:
                     self.last_ack += 1
                     acked = True
@@ -230,6 +230,18 @@ class TestServerNonExiting(TestResponses):
         expected_response = file_contents
         assert response == expected_response
 
+    def test_get_sample_files(self, client: Client):
+        """Tests the sample files provided for this homework assignment"""
+        sample_files = ["foo1", "foo2", "foo3"]
+        for file in sample_files:
+            filepath = resources_filepath.joinpath(file)
+            response = client.get(filepath)
+
+            with open(filepath, "rb") as f:
+                file_contents = f.read()
+            expected_response = file_contents
+            assert response == expected_response
+
     def test_put(self, client: Client):
         test_contents = b"Hello world!\nGoodbye...\n"
         filepath = resources_filepath.joinpath("test.txt")
@@ -241,6 +253,24 @@ class TestServerNonExiting(TestResponses):
         assert file_contents == test_contents
 
         Path(filepath).unlink()
+
+    def test_put_sample_files(self, client: Client):
+        """Tests the sample files provided for this homework assignment"""
+        sample_files = ["foo1", "foo2", "foo3"]
+        test_prefix = "test_"
+        for file in sample_files:
+            input_filepath = resources_filepath.joinpath(file)
+            with open(input_filepath, "rb") as f:
+                test_contents = f.read()
+            output_filepath = resources_filepath.joinpath(f"{test_prefix}{file}")
+            client.put(output_filepath, test_contents)
+
+            with open(output_filepath, "rb") as f:
+                file_contents = f.read()
+
+            assert file_contents == test_contents
+
+            Path(output_filepath).unlink()
 
     def test_delete(self, client: Client):
         filepath = resources_filepath.joinpath("test.txt")
