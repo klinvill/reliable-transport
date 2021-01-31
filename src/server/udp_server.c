@@ -15,6 +15,7 @@
 #include <sys/stat.h>
 
 #include "../common/reliable_udp/reliable_udp.h"
+#include "../common/kftp/kftp.h"
 
 #define BUFSIZE 1024
 #define MAX_FILES 100
@@ -111,19 +112,7 @@ int do_get(char *filename, SocketInfo *socket_info, RudpSender *sender) {
     if (f == NULL)
         error("Could not open file for reading");
 
-    char buffer[BUFSIZE] = {0,};
-    int ret_code = 0;
-    size_t bytes_read = 0;
-
-    while ((bytes_read = fread(buffer, sizeof(char), BUFSIZE - 1, f)) > 0) {
-        buffer[bytes_read] = 0;
-        ret_code = do_send(buffer, socket_info, sender);
-        // TODO: what should I return for ret_code? Right now it's just tracking the last number of bytes read
-        if (ret_code < 0)
-            break;
-    }
-
-    return ret_code;
+    return kftp_send_file(f, socket_info, sender);
 }
 
 int do_put(char *filename) { return NOT_IMPLEMENTED_ERROR; }

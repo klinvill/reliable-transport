@@ -9,6 +9,7 @@ address = "127.0.0.1"
 port = 8080
 resources_filepath = Path("tests/resources/")
 
+
 class RudpHeader:
     def __init__(self, seq_num: int, ack_num: int, data_size: int):
         self.seq_num = seq_num
@@ -22,7 +23,7 @@ class RudpHeader:
                 )
 
     @staticmethod
-    def deserialize(data: bytes):
+    def deserialize(data: bytes) -> "RudpHeader":
         assert len(data) >= 12
         return RudpHeader(int.from_bytes(data[0:4], "big", signed=True),
                           int.from_bytes(data[4:8], "big", signed=True),
@@ -39,10 +40,23 @@ class RudpMessage:
         return self.header.serialize() + self.data
 
     @staticmethod
-    def deserialize(data: bytes):
+    def deserialize(data: bytes) -> "RudpMessage":
         header = RudpHeader.deserialize(data)
         assert header.data_size == len(data[12:])
         return RudpMessage(header, data[12:])
+
+
+class KftpHeader:
+    def __init__(self, data_size: int):
+        self.data_size = data_size
+
+    def serialize(self) -> bytes:
+        return self.data_size.to_bytes(4, "big", signed=True)
+
+    @staticmethod
+    def deserialize(data: bytes) -> "KftpHeader":
+        assert len(data) >= 4
+        return KftpHeader(int.from_bytes(data[0:4], "big", signed=True))
 
 
 class RudpSender:
@@ -74,24 +88,37 @@ class RudpReceiver:
         self.last_received = last_received
 
     def receive(self) -> bytes:
-        full_data = b''
         while True:
             try:
                 (data, addr) = self.sock.recvfrom(self.BUFSIZE)
             except socket.timeout:
-                break
+                return b''
             if addr == (address, port):
                 recv_message = RudpMessage.deserialize(data)
                 if recv_message.header.seq_num == self.last_received + 1:
                     self.last_received += 1
-                    full_data += recv_message.data
                     self.send_ack(recv_message.header.seq_num)
-
-        return full_data
+                    return recv_message.data
 
     def send_ack(self, ack_num: int):
         message = RudpMessage(RudpHeader(0, ack_num, 0), b'')
         self.sock.sendto(message.serialize(), (address, port))
+
+
+class KftpReceiver:
+    def __init__(self, receiver: RudpReceiver):
+        self.receiver = receiver
+
+    def receive(self) -> bytes:
+        first_message = self.receiver.receive()
+        header = KftpHeader.deserialize(first_message)
+        file_data = first_message[4:]
+
+        while len(file_data) < header.data_size:
+            next_message = self.receiver.receive()
+            file_data += next_message
+
+        return file_data
 
 
 class Client:
@@ -105,7 +132,8 @@ class Client:
         self.receiver = RudpReceiver(self.sock)
 
     def get(self, filename: str) -> bytes:
-        return self.send_and_receive(f"get {filename}".encode())
+        self.send(f"get {filename}".encode())
+        return KftpReceiver(self.receiver).receive()
 
     def put(self, filename: str) -> bytes:
         return self.send_and_receive(f"put {filename}".encode())
@@ -157,6 +185,7 @@ def run_server() -> Generator[subprocess.Popen, None, None]:
         time.sleep(1)
         yield proc
         proc.kill()
+
 
 class TestResponses:
     not_implemented_message_format = "Command not yet implemented: {command}"
