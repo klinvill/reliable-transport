@@ -23,6 +23,6 @@ typedef struct {
 } KftpMessage;
 
 int kftp_send_file(FILE* read_fp, SocketInfo* to, RudpSender* sender);
-int kftp_recv_file(FILE* read_fp, SocketInfo* to, RudpSender* sender);
+int kftp_recv_file(FILE* write_fp, SocketInfo* from, RudpReceiver * receiver);
 
 #endif //UDP_KFTP_H

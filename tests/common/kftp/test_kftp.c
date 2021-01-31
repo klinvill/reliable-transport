@@ -154,12 +154,138 @@ static void test_kftp_send_file_over_several_rudp_messages(void** state) {
     destroy_random_buffer(dummy_file_contents);
 }
 
+static void test_kftp_recv_small_file(void** state) {
+    SocketInfo socket_info = {};
+    RudpReceiver receiver = {};
+
+    int dummy_filesize = 10;
+    char* dummy_file_contents = create_random_buffer(dummy_filesize);
+
+    // mocks
+    char received_data[100] = {};
+    int buffer_len = 100;
+    KftpHeader header = {.data_size=dummy_filesize};
+    int serialized = serialize_kftp_header(&header, received_data, buffer_len);
+    int received_data_size = dummy_filesize + serialized;
+    assert(received_data_size <= buffer_len);
+    memcpy(&received_data[serialized], dummy_file_contents, dummy_filesize);
+    set_rudp_recv_buffer(received_data, received_data_size, received_data_size);
+
+    check_fwrite(dummy_file_contents, dummy_filesize, dummy_filesize);
+
+    int result = kftp_recv_file(NULL, &socket_info, &receiver);
+
+    assert_int_equal(result, 0);
+
+    destroy_random_buffer(dummy_file_contents);
+}
+
+static void test_kftp_recv_file_over_two_messages(void** state) {
+    SocketInfo socket_info = {};
+    RudpReceiver receiver = {};
+
+    int dummy_filesize = MAX_DATA_SIZE;
+    char* dummy_file_contents = create_random_buffer(dummy_filesize);
+
+    int first_msg_data_size = MAX_DATA_SIZE - KFTP_HEADER_SIZE;
+    int second_msg_data_size = dummy_filesize - first_msg_data_size;
+
+    char* received_buffers[2] = {
+            (char[MAX_DATA_SIZE]) {},
+            (char[MAX_DATA_SIZE]) {},
+    };
+
+    // mocks
+    // receive and write first chunk
+    KftpHeader header = {.data_size=dummy_filesize};
+    int serialized = serialize_kftp_header(&header, received_buffers[0], MAX_DATA_SIZE);
+    int received_data_size = serialized + first_msg_data_size;
+    assert(received_data_size <= MAX_DATA_SIZE);
+    memcpy(&received_buffers[0][serialized], dummy_file_contents, first_msg_data_size);
+    set_rudp_recv_buffer(received_buffers[0], received_data_size, received_data_size);
+
+    check_fwrite(dummy_file_contents, first_msg_data_size, first_msg_data_size);
+
+    // receive and write second chunk
+    assert(second_msg_data_size < MAX_DATA_SIZE);
+    memcpy(received_buffers[1], &dummy_file_contents[first_msg_data_size], second_msg_data_size);
+    set_rudp_recv_buffer(received_buffers[1], second_msg_data_size, second_msg_data_size);
+
+    check_fwrite(&dummy_file_contents[first_msg_data_size], second_msg_data_size, second_msg_data_size);
+
+    int result = kftp_recv_file(NULL, &socket_info, &receiver);
+
+    assert_int_equal(result, 0);
+
+    destroy_random_buffer(dummy_file_contents);
+}
+
+static void test_kftp_recv_file_over_several_rudp_messages(void** state) {
+    SocketInfo socket_info = {};
+    RudpReceiver receiver = {};
+
+    int dummy_filesize = MAX_DATA_SIZE * 5;
+    char* dummy_file_contents = create_random_buffer(dummy_filesize);
+    int num_messages = 1 + (dummy_filesize + KFTP_HEADER_SIZE - 1) / MAX_DATA_SIZE;
+
+    int first_msg_data_size = MAX_DATA_SIZE - KFTP_HEADER_SIZE;
+    int remaining_data_size = dummy_filesize - first_msg_data_size;
+
+    // mocks
+    check_fwrite(dummy_file_contents, first_msg_data_size, first_msg_data_size);
+    while(remaining_data_size > 0) {
+        int i = dummy_filesize - remaining_data_size;
+        int next_recv_size = min(remaining_data_size, MAX_DATA_SIZE);
+        check_fwrite(&dummy_file_contents[i], next_recv_size, next_recv_size);
+        remaining_data_size -= next_recv_size;
+    }
+
+    // should have a buffer for each message
+    assert(num_messages == 6);
+    char* received_buffers[6] = {
+            (char[MAX_DATA_SIZE]) {},
+            (char[MAX_DATA_SIZE]) {},
+            (char[MAX_DATA_SIZE]) {},
+            (char[MAX_DATA_SIZE]) {},
+            (char[MAX_DATA_SIZE]) {},
+            (char[MAX_DATA_SIZE]) {},
+    };
+
+    // Set first received rudp message
+    KftpHeader header = {.data_size=dummy_filesize};
+    int serialized = serialize_kftp_header(&header, received_buffers[0], MAX_DATA_SIZE);
+    int received_data_size = serialized + first_msg_data_size;
+    assert(received_data_size <= MAX_DATA_SIZE);
+    memcpy(&received_buffers[0][serialized], dummy_file_contents, first_msg_data_size);
+    set_rudp_recv_buffer(received_buffers[0], received_data_size, received_data_size);
+
+    // Set successive received rudp messages
+    remaining_data_size = dummy_filesize - first_msg_data_size;
+    int i = 1;
+    while(remaining_data_size > 0) {
+        int offset = dummy_filesize - remaining_data_size;
+        int next_recv_size = min(remaining_data_size, MAX_DATA_SIZE);
+        memcpy(received_buffers[i], &dummy_file_contents[offset], next_recv_size);
+        set_rudp_recv_buffer(received_buffers[i], next_recv_size, next_recv_size);
+        remaining_data_size -= next_recv_size;
+        i++;
+    }
+
+    int result = kftp_recv_file(NULL, &socket_info, &receiver);
+
+    assert_int_equal(result, 0);
+
+    destroy_random_buffer(dummy_file_contents);
+}
 
 int main(void) {
     const struct CMUnitTest tests[] = {
             cmocka_unit_test(test_kftp_send_small_file),
             cmocka_unit_test(test_kftp_send_file_over_two_rudp_messages),
             cmocka_unit_test(test_kftp_send_file_over_several_rudp_messages),
+            cmocka_unit_test(test_kftp_recv_small_file),
+            cmocka_unit_test(test_kftp_recv_file_over_two_messages),
+            cmocka_unit_test(test_kftp_recv_file_over_several_rudp_messages),
     };
 
     return cmocka_run_group_tests(tests, NULL, NULL);

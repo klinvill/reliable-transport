@@ -76,3 +76,39 @@ int kftp_send_file(FILE* read_fp, SocketInfo* to, RudpSender* sender) {
     assert(remaining_bytes == 0);
     return 0;
 }
+
+int kftp_recv_file(FILE* write_fp, SocketInfo* from, RudpReceiver * receiver) {
+    char rudp_buffer[MAX_DATA_SIZE] = {};
+
+    int received_bytes = rudp_recv(rudp_buffer, MAX_DATA_SIZE, from, receiver);
+    // TODO: error handling
+    if (received_bytes < 0)
+        return received_bytes;
+
+    KftpHeader header = {};
+    int deserialized = deserialize_kftp_header(rudp_buffer, MAX_DATA_SIZE, &header);
+    // TODO: error handling
+    if (deserialized != KFTP_HEADER_SIZE)
+        return -1;
+
+    int received_data_bytes = received_bytes - deserialized;
+    assert(received_data_bytes > 0);
+    int remaining_bytes = header.data_size - received_data_bytes;
+
+    size_t written_chunk_size = fwrite(&rudp_buffer[deserialized], sizeof(char), received_data_bytes, write_fp);
+    // TODO: error handling
+    if (written_chunk_size != received_data_bytes)
+        return -1;
+
+    while(remaining_bytes > 0) {
+        received_bytes = rudp_recv(rudp_buffer, MAX_DATA_SIZE, from, receiver);
+        assert(received_bytes > 0);
+        written_chunk_size = fwrite(rudp_buffer, sizeof(char), received_bytes, write_fp);
+        // TODO: error handling
+        if (written_chunk_size != received_bytes)
+            return -1;
+        remaining_bytes -= received_bytes;
+    }
+
+    return 0;
+}
