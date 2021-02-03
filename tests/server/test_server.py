@@ -2,12 +2,51 @@ import pytest
 import subprocess
 import socket
 import time
-from typing import Generator
+from typing import Generator, Tuple
 from pathlib import Path
 
 address = "127.0.0.1"
 port = 8080
 resources_filepath = Path("tests/resources/")
+
+class Socket:
+    def __init__(self, sock: socket.socket):
+        self.sock = sock
+
+    def sendto(self, data: bytes, s_address: Tuple[str, int]) -> int:
+        return self.sock.sendto(data, s_address)
+
+    def recvfrom(self, bufsize: int) -> Tuple[bytes, Tuple[str, int]]:
+        return self.sock.recvfrom(bufsize)
+
+
+class UnreliableSocket(Socket):
+    def __init__(self, sock: socket.socket):
+        super().__init__(sock)
+        self.recv_counter = 0
+
+    def sendto(self, data: bytes, s_address: Tuple[str, int]) -> int:
+        # the unreliable socket will periodically flip all the bits in a message to simulate an out-of-order message
+        # being received, or the original message being dropped during transmission. This shouldnt cause the parsers to
+        # crash since they should only look at the header which will contain sequence/ack numbers that are not expected.
+        flipped_data = bytes([d ^ 0xff for d in data])
+        print(f"Sending (flipped): {flipped_data}")
+        self.sock.sendto(flipped_data, s_address)
+
+        print(f"Sending: {data}")
+        return self.sock.sendto(data, s_address)
+
+    def recvfrom(self, bufsize: int) -> Tuple[bytes, Tuple[str, int]]:
+        # periodically ignore a message, simulating the case where a response is lost
+        if self.recv_counter % 2 == 0:
+            (result, from_address) = self.sock.recvfrom(bufsize)
+            self.recv_counter += 1
+            print(f"Received (ignoring): {(result, from_address)}")
+
+        (result, from_address) = self.sock.recvfrom(bufsize)
+        self.recv_counter += 1
+        print(f"Received: {(result, from_address)}")
+        return (result, from_address)
 
 
 class RudpHeader:
@@ -67,26 +106,39 @@ class KftpHeader:
 
 
 class RudpSender:
-    def __init__(self, sock: socket.socket, last_ack: int = 0):
+    timeout_retries = 5
+
+    def __init__(self, sock: Socket, last_ack: int = 0):
         self.sock = sock
         self.last_ack = last_ack
 
     def send(self, data: bytes):
         message = RudpMessage(RudpHeader(self.last_ack + 1, 0, len(data)), data)
-        self.sock.sendto(message.serialize(), (address, port))
 
+        counter = 0
         acked = False
         while not acked:
-            (recv_data, addr) = self.sock.recvfrom(RudpMessage.BUFSIZE)
+            self.sock.sendto(message.serialize(), (address, port))
+            try:
+                (recv_data, addr) = self.sock.recvfrom(RudpMessage.BUFSIZE)
+            except socket.timeout as err:
+                if counter < self.timeout_retries:
+                    counter += 1
+                    print("Timeout while waiting for ACK, retrying...")
+                    continue
+                else:
+                    raise err
+            print(f"Checked for ack: {recv_data}")
             if addr == (address, port):
                 recv_message = RudpMessage.deserialize(recv_data)
                 if recv_message.header.ack_num == self.last_ack + 1:
+                    print(f"Acked: {recv_message.header.ack_num}")
                     self.last_ack += 1
                     acked = True
 
 
 class RudpReceiver:
-    def __init__(self, sock: socket.socket, last_received: int = 0):
+    def __init__(self, sock: Socket, last_received: int = 0):
         self.sock = sock
         self.last_received = last_received
 
@@ -150,8 +202,8 @@ class KftpReceiver:
 class Client:
     SOCKET_TIMEOUT = 0.1    # in seconds
 
-    def __init__(self, sock: socket.socket):
-        sock.settimeout(self.SOCKET_TIMEOUT)
+    def __init__(self, sock: Socket):
+        sock.sock.settimeout(self.SOCKET_TIMEOUT)
         self.sock = sock
         self.sender = RudpSender(self.sock)
         self.receiver = RudpReceiver(self.sock)
@@ -184,10 +236,17 @@ class Client:
         return self.receive()
 
 
-@pytest.fixture
-def client() -> Client:
+@pytest.fixture(params=["reliable", "unreliable"])
+def client(request) -> Client:
+    if request.param == "reliable":
+        cls = Socket
+    elif request.param == "unreliable":
+        cls = UnreliableSocket
+    else:
+        raise NotImplementedError("Only reliable and unreliable sockets currently supported")
+
     with socket.socket(type=socket.SOCK_DGRAM) as sock:
-        yield Client(sock)
+        yield Client(cls(sock))
 
 
 @pytest.fixture(scope="class")
