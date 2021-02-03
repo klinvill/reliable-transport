@@ -81,15 +81,15 @@ Filenames ls_files(char *directory) {
 }
 
 // TODO: which parameters (for all the functions) should be const?
-int do_send(char *message, SocketInfo *socket_info, RudpSender *sender) {
-    int status = rudp_send(message, strlen(message), socket_info, sender);
+int do_send(char *message, SocketInfo *socket_info, RudpSender *sender, RudpReceiver *receiver) {
+    int status = rudp_send(message, strlen(message), socket_info, sender, receiver);
     if (status < 0)
-        error("ERROR in sendto");
+        error("ERROR in rudp_send");
 
     return status;
 }
 
-void send_error(int errno, char *command, SocketInfo *socket_info, RudpSender *sender) {
+void send_error(int errno, char *command, SocketInfo *socket_info, RudpSender *sender, RudpReceiver *receiver) {
     char err_buff[BUFSIZE] = {0,};
 
     switch (errno) {
@@ -103,16 +103,16 @@ void send_error(int errno, char *command, SocketInfo *socket_info, RudpSender *s
             snprintf(err_buff, BUFSIZE, "Unrecognized error code: %d", errno);
     }
 
-    do_send(err_buff, socket_info, sender);
+    do_send(err_buff, socket_info, sender, receiver);
 }
 
 // Commands, prefixed with do_ to avoid name collisions (e.g. with exit())
-int do_get(char *filename, SocketInfo *socket_info, RudpSender *sender) {
+int do_get(char *filename, SocketInfo *socket_info, RudpSender *sender, RudpReceiver *receiver) {
     FILE *f = fopen(filename, "r");
     if (f == NULL)
         error("Could not open file for reading");
 
-    int result = kftp_send_file(f, socket_info, sender);
+    int result = kftp_send_file(f, socket_info, sender, receiver);
     fclose(f);
     return result;
 }
@@ -127,15 +127,15 @@ int do_put(char *filename, SocketInfo *socket_info, RudpReceiver *receiver) {
     return result;
 }
 
-int do_delete(char *filename, SocketInfo *socket_info, RudpSender *sender) {
+int do_delete(char *filename, SocketInfo *socket_info, RudpSender *sender, RudpReceiver *receiver) {
     // According to given spec, we should do nothing if the file does not exist
     if (unlink(filename) == 0)
-        return do_send("Deleted file\n", socket_info, sender);
+        return do_send("Deleted file\n", socket_info, sender, receiver);
 
     return 0;
 }
 
-int do_ls(SocketInfo *socket_info, RudpSender *sender) {
+int do_ls(SocketInfo *socket_info, RudpSender *sender, RudpReceiver *receiver) {
     Filenames filenames = ls_files(".");
     char message[BUFSIZE] = {0,};
 
@@ -149,7 +149,7 @@ int do_ls(SocketInfo *socket_info, RudpSender *sender) {
             error("The filenames are too large to all fit into the buffer");
         }
     }
-    int ret_code = do_send(message, socket_info, sender);
+    int ret_code = do_send(message, socket_info, sender, receiver);
 
     // ls_files() allocates memory that needs to be freed
     cleanup_filenames(&filenames);
@@ -158,9 +158,9 @@ int do_ls(SocketInfo *socket_info, RudpSender *sender) {
 }
 
 // does not return
-void do_exit(SocketInfo *socket_info, RudpSender *sender) {
+void do_exit(SocketInfo *socket_info, RudpSender *sender, RudpReceiver *receiver) {
     char *exit_message = "Exiting gracefully";
-    do_send(exit_message, socket_info, sender);
+    do_send(exit_message, socket_info, sender, receiver);
 
     close(socket_info->sockfd);
     exit(0);
@@ -178,9 +178,9 @@ int process_message(char *message, SocketInfo *socket_info, RudpSender *sender, 
         if (second_token) return PARSE_ERROR;
 
         if (strcmp(first_token, "ls") == 0)
-            return do_ls(socket_info, sender);
+            return do_ls(socket_info, sender, receiver);
         else if (strcmp(first_token, "exit") == 0)
-            do_exit(socket_info, sender);
+            do_exit(socket_info, sender, receiver);
     }
 
     // double arg commands
@@ -191,11 +191,11 @@ int process_message(char *message, SocketInfo *socket_info, RudpSender *sender, 
         if (strtok(NULL, DELIMITERS)) return PARSE_ERROR;
 
         if (strcmp(first_token, "get") == 0)
-            return do_get(second_token, socket_info, sender);
+            return do_get(second_token, socket_info, sender, receiver);
         else if (strcmp(first_token, "put") == 0)
             return do_put(second_token, socket_info, receiver);
         else if (strcmp(first_token, "delete") == 0)
-            return do_delete(second_token, socket_info, sender);
+            return do_delete(second_token, socket_info, sender, receiver);
     }
 
     return PARSE_ERROR;
@@ -257,7 +257,7 @@ int main(int argc, char **argv) {
     SocketInfo client_socket_info = {sockfd, (struct sockaddr *) &clientaddr, clientlen};
 
     RudpReceiver receiver = {};
-    RudpSender sender = {};
+    RudpSender sender = {.sender_timeout=SENDER_TIMEOUT};
 
     /*
      * main loop: wait for a datagram, then echo it
@@ -299,7 +299,7 @@ int main(int argc, char **argv) {
         strncpy(original_command, buf, BUFSIZE - 1);
         int status = process_message(buf, &client_socket_info, &sender, &receiver);
         if (status < 0) {
-            send_error(status, original_command, &client_socket_info, &sender);
+            send_error(status, original_command, &client_socket_info, &sender, &receiver);
         }
     }
 }

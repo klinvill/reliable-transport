@@ -26,7 +26,7 @@ void set_rudp_recv_buffer(char* buffer, size_t buff_size, size_t ret_val) {
     will_return(rudp_recv, ret_val);
 }
 
-int rudp_send(char* data, int data_size, SocketInfo* to, RudpSender* sender) {
+int rudp_send(char* data, int data_size, SocketInfo* to, RudpSender* sender, RudpReceiver* receiver) {
     check_expected(data_size);
     check_expected(data);
 

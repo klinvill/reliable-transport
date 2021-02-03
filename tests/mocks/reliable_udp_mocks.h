@@ -8,7 +8,7 @@
 #include "../../src/common/reliable_udp/types.h"
 
 
-int rudp_send(char* data, int data_size, SocketInfo* to, RudpSender* sender);
+int rudp_send(char* data, int data_size, SocketInfo* to, RudpSender* sender, RudpReceiver* receiver);
 int rudp_recv(char* buffer, int buffer_size, SocketInfo* from, RudpReceiver* receiver);
 
 // helper functions to wrap expected cmocka arguments

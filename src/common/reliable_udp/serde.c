@@ -39,7 +39,7 @@ int deserialize(char* buffer, int buffer_len, RudpMessage* message) {
     int expected_size = deserialized + expected_data_size;
 
     // TODO: error handling
-    if (buffer_len < expected_size)
+    if (buffer_len < expected_size || expected_data_size < 0 || expected_size < 0)
         return -1;
 
     // TODO: error handling

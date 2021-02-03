@@ -12,7 +12,7 @@
 #include <assert.h>
 
 
-int kftp_send_file(FILE* read_fp, SocketInfo* to, RudpSender* sender) {
+int kftp_send_file(FILE* read_fp, SocketInfo* to, RudpSender* sender, RudpReceiver* receiver) {
     int status = fseek(read_fp, 0, SEEK_END);
     // TODO: error handling;
     if (status < 0)
@@ -47,7 +47,7 @@ int kftp_send_file(FILE* read_fp, SocketInfo* to, RudpSender* sender) {
 
     size_t remaining_bytes = file_size - read_bytes;
 
-    status = rudp_send(rudp_buffer, serialized+read_bytes, to, sender);
+    status = rudp_send(rudp_buffer, serialized+read_bytes, to, sender, receiver);
     // TODO: error handling
     if (status < 0)
         return status;
@@ -65,7 +65,7 @@ int kftp_send_file(FILE* read_fp, SocketInfo* to, RudpSender* sender) {
             return -1;
         }
 
-        status = rudp_send(rudp_buffer, read_bytes, to, sender);
+        status = rudp_send(rudp_buffer, read_bytes, to, sender, receiver);
         // TODO: error handling
         if (status < 0)
             return status;

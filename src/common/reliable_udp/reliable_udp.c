@@ -10,13 +10,33 @@
 #include <string.h>
 #include <assert.h>
 #include <stdlib.h>
+#include <stdio.h>
 
 #include "serde.h"
 #include "types.h"
 #include "../utils.h"
 
 
-int rudp_send_chunk(char* data, int data_size, SocketInfo* to, RudpSender* sender) {
+bool in_old_ack_window(RudpMessage* received_message, RudpReceiver* receiver) {
+    // TODO: we treat 0 as a special value here to indicate the type of message. Should instead modify the header
+    //  struct to include an indication of if the message is a seq or ack
+    return received_message->header.seq_num != 0
+        && 0 <= (receiver->last_received - received_message->header.seq_num)
+        && (receiver->last_received - received_message->header.seq_num) < ACK_WINDOW;
+}
+
+int ack(RudpMessage* received_message, SocketInfo* from) {
+    RudpMessage ack_message = {.header = (RudpHeader) {.ack_num=received_message->header.seq_num, .data_size=0}};
+
+    char wire_data[MAX_PAYLOAD_SIZE] = {0,};
+    int wire_data_len = serialize(&ack_message, wire_data, MAX_PAYLOAD_SIZE);
+    if (wire_data_len < 0)
+        return wire_data_len;
+
+    return sendto(from->sockfd, wire_data, wire_data_len, 0, from->addr, from->addr_len);
+}
+
+int rudp_send_chunk(char* data, int data_size, SocketInfo* to, RudpSender* sender, RudpReceiver* receiver) {
     if(data_size > MAX_DATA_SIZE || data_size < 0)
         return PAYLOAD_TOO_LARGE_ERROR;
 
@@ -63,7 +83,7 @@ int rudp_send_chunk(char* data, int data_size, SocketInfo* to, RudpSender* sende
             return status;
 
         // TODO: replace with adaptive timeout based on average RTTs
-        status = poll(poll_fds, 1, sender->sender_timeout);
+        status = poll(poll_fds, 1, sender->message_timeout);
         // TODO: error handling
         if (status < 0)
             return status;
@@ -78,14 +98,26 @@ int rudp_send_chunk(char* data, int data_size, SocketInfo* to, RudpSender* sende
                 return n;
 
             RudpMessage received_message = {};
+            // TODO: ensure any memory allocated by deserialization is freed
             int deserialized = deserialize(buffer, MAX_PAYLOAD_SIZE, &received_message);
 
-            if (deserialized < 0)
-                return deserialized;
+            if (deserialized < 0) {
+                fprintf(stderr, "Deserialization error %d, ignoring message\n", deserialized);
+                continue;
+            }
 
             if (received_message.header.ack_num == sender->last_ack + 1) {
                 sender->last_ack++;
                 acked = true;
+            }
+            // if a previously sent ack is lost, the receiver could be stuck re-sending their message and never process
+            // the one we just sent. To handle this situation, we also need to be able to respond with acks to previous
+            // incoming messages
+            else if (in_old_ack_window(&received_message, receiver)) {
+                status = ack(&received_message, to);
+                // TODO: error handling
+                if (status < 0)
+                    continue;
             }
         }
     } while(!acked);
@@ -93,7 +125,7 @@ int rudp_send_chunk(char* data, int data_size, SocketInfo* to, RudpSender* sende
     return 0;
 }
 
-int rudp_send(char* data, int data_size, SocketInfo* to, RudpSender* sender) {
+int rudp_send(char* data, int data_size, SocketInfo* to, RudpSender* sender, RudpReceiver* receiver) {
     int num_chunks = (data_size / (MAX_DATA_SIZE+1)) + 1;
     // TODO: error handling
     if (num_chunks < 1)
@@ -102,7 +134,7 @@ int rudp_send(char* data, int data_size, SocketInfo* to, RudpSender* sender) {
     int bytes_sent = 0;
     for (int i = 0; i < num_chunks; i++) {
         int chunk_size = min(data_size - bytes_sent, MAX_DATA_SIZE);
-        int status = rudp_send_chunk(&data[bytes_sent], chunk_size, to, sender);
+        int status = rudp_send_chunk(&data[bytes_sent], chunk_size, to, sender, receiver);
         // TODO: error handling
         if (status < 0)
             return status;
@@ -126,18 +158,8 @@ int rudp_handle_received_message(RudpMessage* received_message, char* buffer, in
     // simply reply with an ACK for any message that has a sequence number within the ACK_WINDOW preceding our last
     // received sequence number
     if (received_message->header.seq_num == receiver->last_received + 1
-        || (0 <= (receiver->last_received - received_message->header.seq_num)
-            && (receiver->last_received - received_message->header.seq_num) < ACK_WINDOW)) {
-        RudpMessage ack_message = {.header = (RudpHeader) {.ack_num=received_message->header.seq_num, .data_size=0}};
-
-        char wire_data[MAX_PAYLOAD_SIZE] = {0,};
-        int wire_data_len = serialize(&ack_message, wire_data, MAX_PAYLOAD_SIZE);
-        if (wire_data_len < 0) {
-            ret_code = wire_data_len;
-            goto dealloc;
-        }
-
-        int status = sendto(from->sockfd, wire_data, wire_data_len, 0, from->addr, from->addr_len);
+        || in_old_ack_window(received_message, receiver)) {
+        int status = ack(received_message, from);
         // TODO: error handling
         if (status < 0) {
             ret_code = status;
@@ -169,8 +191,10 @@ int rudp_recv(char* buffer, int buffer_size, SocketInfo* from, RudpReceiver* rec
         RudpMessage received_message = {};
         int deserialized = deserialize(buffer, buffer_size, &received_message);
         // TODO: error handling
-        if (deserialized < 0)
-            return deserialized;
+        if (deserialized < 0) {
+            fprintf(stderr, "Deserialization error %d, ignoring message\n", deserialized);
+            continue;
+        }
 
         int last_received = receiver->last_received;
         // frees received_message's dynamically allocated data buffer before exiting

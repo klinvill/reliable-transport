@@ -43,6 +43,7 @@ void destroy_random_buffer(char* buffer) {
 static void test_kftp_send_small_file(void** state) {
     SocketInfo socket_info = {};
     RudpSender sender = {};
+    RudpReceiver receiver = {};
 
     int dummy_filesize = 10;
     char* dummy_file_contents = create_random_buffer(dummy_filesize);
@@ -63,7 +64,7 @@ static void test_kftp_send_small_file(void** state) {
     memcpy(&expected_data[serialized], dummy_file_contents, dummy_filesize);
     check_rudp_send(expected_data, expected_data_size, RUDP_SEND_SUCCESS);
 
-    int result = kftp_send_file(NULL, &socket_info, &sender);
+    int result = kftp_send_file(NULL, &socket_info, &sender, &receiver);
 
     assert_int_equal(result, 0);
 
@@ -73,6 +74,7 @@ static void test_kftp_send_small_file(void** state) {
 static void test_kftp_send_file_over_two_rudp_messages(void** state) {
     SocketInfo socket_info = {};
     RudpSender sender = {};
+    RudpReceiver receiver = {};
 
     int dummy_filesize = MAX_DATA_SIZE;
     char* dummy_file_contents = create_random_buffer(dummy_filesize);
@@ -100,7 +102,7 @@ static void test_kftp_send_file_over_two_rudp_messages(void** state) {
     memcpy(expected_data, &dummy_file_contents[first_msg_data_size], second_msg_data_size);
     check_rudp_send(expected_data, second_msg_data_size, RUDP_SEND_SUCCESS);
 
-    int result = kftp_send_file(NULL, &socket_info, &sender);
+    int result = kftp_send_file(NULL, &socket_info, &sender, &receiver);
 
     assert_int_equal(result, 0);
 
@@ -110,6 +112,7 @@ static void test_kftp_send_file_over_two_rudp_messages(void** state) {
 static void test_kftp_send_file_over_several_rudp_messages(void** state) {
     SocketInfo socket_info = {};
     RudpSender sender = {};
+    RudpReceiver receiver = {};
 
     int dummy_filesize = MAX_DATA_SIZE * 5;
     char* dummy_file_contents = create_random_buffer(dummy_filesize);
@@ -147,7 +150,7 @@ static void test_kftp_send_file_over_several_rudp_messages(void** state) {
         remaining_data_size -= next_read_size;
     }
 
-    int result = kftp_send_file(NULL, &socket_info, &sender);
+    int result = kftp_send_file(NULL, &socket_info, &sender, &receiver);
 
     assert_int_equal(result, 0);
 

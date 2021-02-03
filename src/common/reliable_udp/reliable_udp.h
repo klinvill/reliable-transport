@@ -21,7 +21,7 @@
 
 
 // sends data as a single UDP message
-int rudp_send(char* data, int data_size, SocketInfo* to, RudpSender* sender);
+int rudp_send(char* data, int data_size, SocketInfo* to, RudpSender* sender, RudpReceiver* receiver);
 int rudp_recv(char* buffer, int buffer_size, SocketInfo* from, RudpReceiver* receiver);
 
 #endif //UDP_RELIABLE_UDP_H

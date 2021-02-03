@@ -28,6 +28,7 @@ static void test_rudp_send_succeeds_with_ack(void** state) {
     struct sockaddr_in addr = {.sin_port=8080, .sin_addr=0x7F000001, .sin_family=AF_INET};
     SocketInfo socket_info = {.addr=(struct sockaddr*) &addr, .addr_len=sizeof(addr), .sockfd=999};
     RudpSender sender = {.last_ack=0, .message_timeout=INITIAL_TIMEOUT, .sender_timeout=SENDER_TIMEOUT};
+    RudpReceiver receiver = {};
 
     // mocked responses
     set_sendto_rc(SENDTO_SUCCESS);
@@ -39,7 +40,7 @@ static void test_rudp_send_succeeds_with_ack(void** state) {
     serialize_header(&recvfrom_header, recvfrom_buffer, buffer_len);
     set_recvfrom_buffer(recvfrom_buffer, buffer_len, RECVFROM_SUCCESS);
 
-    int result = rudp_send(buffer, buffer_len, &socket_info, &sender);
+    int result = rudp_send(buffer, buffer_len, &socket_info, &sender, &receiver);
     assert_int_equal(result, 0);
     assert_int_equal(sender.last_ack, 1);
 }
@@ -50,6 +51,7 @@ static void test_rudp_send_succeeds_despite_message_loss(void** state) {
     struct sockaddr_in addr = {.sin_port=8080, .sin_addr=0x7F000001, .sin_family=AF_INET};
     SocketInfo socket_info = {.addr=(struct sockaddr*) &addr, .addr_len=sizeof(addr), .sockfd=999};
     RudpSender sender = {.last_ack=0, .message_timeout=INITIAL_TIMEOUT, .sender_timeout=SENDER_TIMEOUT};
+    RudpReceiver receiver = {};
 
     set_sendto_rc_count(SENDTO_SUCCESS, 4);
     will_return_count(poll, POLL_NOT_READY, 3);
@@ -61,7 +63,7 @@ static void test_rudp_send_succeeds_despite_message_loss(void** state) {
     serialize_header(&recvfrom_header, recvfrom_buffer, buffer_len);
     set_recvfrom_buffer(recvfrom_buffer, buffer_len, RECVFROM_SUCCESS);
 
-    int result = rudp_send(buffer, 100, &socket_info, &sender);
+    int result = rudp_send(buffer, 100, &socket_info, &sender, &receiver);
     assert_int_equal(result, 0);
     assert_int_equal(sender.last_ack, 1);
 }
@@ -77,6 +79,7 @@ static void test_rudp_send_large_message(void** state) {
     struct sockaddr_in addr = {.sin_port=8080, .sin_addr=0x7F000001, .sin_family=AF_INET};
     SocketInfo socket_info = {.addr=(struct sockaddr*) &addr, .addr_len=sizeof(addr), .sockfd=999};
     RudpSender sender = {.last_ack=0, .message_timeout=INITIAL_TIMEOUT, .sender_timeout=SENDER_TIMEOUT};
+    RudpReceiver receiver = {};
 
     // mocked responses
     will_return_count(poll, POLL_READY, 2);
@@ -111,7 +114,7 @@ static void test_rudp_send_large_message(void** state) {
         check_sendto(expected_sent_buffers[i], serialized, SENDTO_SUCCESS);
     }
 
-    int result = rudp_send(buffer, buffer_len, &socket_info, &sender);
+    int result = rudp_send(buffer, buffer_len, &socket_info, &sender, &receiver);
     assert_int_equal(result, 0);
     assert_int_equal(sender.last_ack, 2);
 }
@@ -124,6 +127,7 @@ static void test_rudp_send_MAX_DATA_SIZE_message(void** state) {
     struct sockaddr_in addr = {.sin_port=8080, .sin_addr=0x7F000001, .sin_family=AF_INET};
     SocketInfo socket_info = {.addr=(struct sockaddr*) &addr, .addr_len=sizeof(addr), .sockfd=999};
     RudpSender sender = {.last_ack=0, .message_timeout=INITIAL_TIMEOUT, .sender_timeout=SENDER_TIMEOUT};
+    RudpReceiver receiver = {};
 
     // mocked responses
     set_poll_rc(POLL_READY);
@@ -140,7 +144,7 @@ static void test_rudp_send_MAX_DATA_SIZE_message(void** state) {
     serialized = serialize(&expected_sent_message, expected_sent_buffer, MAX_PAYLOAD_SIZE);
     check_sendto(expected_sent_buffer, serialized, SENDTO_SUCCESS);
 
-    int result = rudp_send(buffer, buffer_len, &socket_info, &sender);
+    int result = rudp_send(buffer, buffer_len, &socket_info, &sender, &receiver);
     assert_int_equal(result, 0);
     assert_int_equal(sender.last_ack, 1);
 }
@@ -151,13 +155,52 @@ static void test_rudp_send_eventually_times_out(void** state) {
     struct sockaddr_in addr = {.sin_port=8080, .sin_addr=0x7F000001, .sin_family=AF_INET};
     SocketInfo socket_info = {.addr=(struct sockaddr*) &addr, .addr_len=sizeof(addr), .sockfd=999};
     RudpSender sender = {.last_ack=0, .message_timeout=INITIAL_TIMEOUT, .sender_timeout=SENDER_TIMEOUT};
+    RudpReceiver receiver = {};
 
     will_return_always(sendto, 0);
     will_return_always(poll, POLL_NOT_READY);
 
-    int result = rudp_send(buffer, 100, &socket_info, &sender);
+    int result = rudp_send(buffer, 100, &socket_info, &sender, &receiver);
     assert_int_equal(result, SENDER_TIMEOUT_ERROR);
     assert_int_equal(sender.last_ack, 0);
+}
+
+// If an ack we sent previously is lost, the sender will resend the message. In this case, we want to be able to ack
+// when appropriate to avoid the sender continuously retrying to send
+static void test_rudp_acks_previous_messages(void** state) {
+    char buffer[100] = {0,};
+    int buffer_len = 100;
+    SocketInfo socket_info = {};
+    RudpSender sender = {.last_ack=0, .message_timeout=INITIAL_TIMEOUT, .sender_timeout=SENDER_TIMEOUT};
+    RudpReceiver receiver = {.last_received=5};
+
+    // mocked original send
+    set_sendto_rc(SENDTO_SUCCESS);
+    set_poll_rc(POLL_READY);
+
+    // mocked receive and ack old message
+    RudpHeader old_msg_header = {.seq_num=5};
+    char old_msg_buffer[100] = {0,};
+    serialize_header(&old_msg_header, old_msg_buffer, buffer_len);
+    set_recvfrom_buffer(old_msg_buffer, buffer_len, RECVFROM_SUCCESS);
+
+    RudpHeader old_msg_ack_header = {.ack_num=5};
+    char old_msg_ack_buffer[100] = {0,};
+    serialize_header(&old_msg_ack_header, old_msg_ack_buffer, buffer_len);
+    check_sendto(old_msg_ack_buffer, buffer_len, SENDTO_SUCCESS);
+
+    // mocked resend and ack
+    set_sendto_rc(SENDTO_SUCCESS);
+    set_poll_rc(POLL_READY);
+
+    RudpHeader ack_header = {.ack_num=1};
+    char ack_buffer[100] = {0,};
+    serialize_header(&ack_header, ack_buffer, buffer_len);
+    set_recvfrom_buffer(ack_buffer, buffer_len, RECVFROM_SUCCESS);
+
+    int result = rudp_send(buffer, buffer_len, &socket_info, &sender, &receiver);
+    assert_int_equal(result, 0);
+    assert_int_equal(sender.last_ack, 1);
 }
 
 static void test_rudp_recv_acks_on_receipt(void** state) {
@@ -298,6 +341,7 @@ int main(void) {
             cmocka_unit_test(test_rudp_send_large_message),
             cmocka_unit_test(test_rudp_send_MAX_DATA_SIZE_message),
             cmocka_unit_test(test_rudp_send_eventually_times_out),
+            cmocka_unit_test(test_rudp_acks_previous_messages),
             cmocka_unit_test(test_rudp_recv_acks_on_receipt),
             cmocka_unit_test(test_rudp_recv_acks_previous_requests),
             cmocka_unit_test(test_rudp_recv_does_not_ack_future_requests),
