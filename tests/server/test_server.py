@@ -2,201 +2,16 @@ import pytest
 import subprocess
 import socket
 import time
-from typing import Generator, Tuple
+from typing import Generator
 from pathlib import Path
+
+from tests.e2e_utils.socket_utils import Socket, UnreliableSocket
+from tests.e2e_utils.rudp_utils import RudpReceiver, RudpSender
+from tests.e2e_utils.kftp_utils import KftpReceiver, KftpSender
 
 address = "127.0.0.1"
 port = 8080
 resources_filepath = Path("tests/resources/")
-
-class Socket:
-    def __init__(self, sock: socket.socket):
-        self.sock = sock
-
-    def sendto(self, data: bytes, s_address: Tuple[str, int]) -> int:
-        return self.sock.sendto(data, s_address)
-
-    def recvfrom(self, bufsize: int) -> Tuple[bytes, Tuple[str, int]]:
-        return self.sock.recvfrom(bufsize)
-
-
-class UnreliableSocket(Socket):
-    def __init__(self, sock: socket.socket):
-        super().__init__(sock)
-        self.recv_counter = 0
-
-    def sendto(self, data: bytes, s_address: Tuple[str, int]) -> int:
-        # the unreliable socket will periodically flip all the bits in a message to simulate an out-of-order message
-        # being received, or the original message being dropped during transmission. This shouldnt cause the parsers to
-        # crash since they should only look at the header which will contain sequence/ack numbers that are not expected.
-        flipped_data = bytes([d ^ 0xff for d in data])
-        print(f"Sending (flipped): {flipped_data}")
-        self.sock.sendto(flipped_data, s_address)
-
-        print(f"Sending: {data}")
-        return self.sock.sendto(data, s_address)
-
-    def recvfrom(self, bufsize: int) -> Tuple[bytes, Tuple[str, int]]:
-        # periodically ignore a message, simulating the case where a response is lost
-        if self.recv_counter % 2 == 0:
-            (result, from_address) = self.sock.recvfrom(bufsize)
-            self.recv_counter += 1
-            print(f"Received (ignoring): {(result, from_address)}")
-
-        (result, from_address) = self.sock.recvfrom(bufsize)
-        self.recv_counter += 1
-        print(f"Received: {(result, from_address)}")
-        return (result, from_address)
-
-
-class RudpHeader:
-    SIZE = 12
-
-    def __init__(self, seq_num: int, ack_num: int, data_size: int):
-        self.seq_num = seq_num
-        self.ack_num = ack_num
-        self.data_size = data_size
-
-    def serialize(self) -> bytes:
-        return (self.seq_num.to_bytes(4, "big", signed=True)
-                + self.ack_num.to_bytes(4, "big", signed=True)
-                + self.data_size.to_bytes(4, "big", signed=True)
-                )
-
-    @staticmethod
-    def deserialize(data: bytes) -> "RudpHeader":
-        assert len(data) >= 12
-        return RudpHeader(int.from_bytes(data[0:4], "big", signed=True),
-                          int.from_bytes(data[4:8], "big", signed=True),
-                          int.from_bytes(data[8:12], "big", signed=True))
-
-
-class RudpMessage:
-    BUFSIZE = 1024
-    DATASIZE = BUFSIZE - RudpHeader.SIZE
-
-    def __init__(self, header: RudpHeader, data: bytes):
-        self.header = header
-        self.data = data
-        assert header.data_size == len(data)
-
-    def serialize(self) -> bytes:
-        return self.header.serialize() + self.data
-
-    @staticmethod
-    def deserialize(data: bytes) -> "RudpMessage":
-        header = RudpHeader.deserialize(data)
-        assert header.data_size == len(data[12:])
-        return RudpMessage(header, data[12:])
-
-
-class KftpHeader:
-    SIZE=4
-
-    def __init__(self, data_size: int):
-        self.data_size = data_size
-
-    def serialize(self) -> bytes:
-        return self.data_size.to_bytes(4, "big", signed=True)
-
-    @staticmethod
-    def deserialize(data: bytes) -> "KftpHeader":
-        assert len(data) >= 4
-        return KftpHeader(int.from_bytes(data[0:4], "big", signed=True))
-
-
-class RudpSender:
-    timeout_retries = 5
-
-    def __init__(self, sock: Socket, last_ack: int = 0):
-        self.sock = sock
-        self.last_ack = last_ack
-
-    def send(self, data: bytes):
-        message = RudpMessage(RudpHeader(self.last_ack + 1, 0, len(data)), data)
-
-        counter = 0
-        acked = False
-        while not acked:
-            self.sock.sendto(message.serialize(), (address, port))
-            try:
-                (recv_data, addr) = self.sock.recvfrom(RudpMessage.BUFSIZE)
-            except socket.timeout as err:
-                if counter < self.timeout_retries:
-                    counter += 1
-                    print("Timeout while waiting for ACK, retrying...")
-                    continue
-                else:
-                    raise err
-            print(f"Checked for ack: {recv_data}")
-            if addr == (address, port):
-                recv_message = RudpMessage.deserialize(recv_data)
-                if recv_message.header.ack_num == self.last_ack + 1:
-                    print(f"Acked: {recv_message.header.ack_num}")
-                    self.last_ack += 1
-                    acked = True
-
-
-class RudpReceiver:
-    def __init__(self, sock: Socket, last_received: int = 0):
-        self.sock = sock
-        self.last_received = last_received
-
-    def receive(self) -> bytes:
-        while True:
-            try:
-                (data, addr) = self.sock.recvfrom(RudpMessage.BUFSIZE)
-            except socket.timeout:
-                return b''
-            if addr == (address, port):
-                recv_message = RudpMessage.deserialize(data)
-                if recv_message.header.seq_num == self.last_received + 1:
-                    self.last_received += 1
-                    self.send_ack(recv_message.header.seq_num)
-                    return recv_message.data
-
-    def send_ack(self, ack_num: int):
-        message = RudpMessage(RudpHeader(0, ack_num, 0), b'')
-        self.sock.sendto(message.serialize(), (address, port))
-
-
-class KftpSender:
-    def __init__(self, sender: RudpSender):
-        self.sender = sender
-
-    def send(self, file_data: bytes):
-        header = KftpHeader(len(file_data))
-        serialized_header = header.serialize()
-
-        if len(file_data) + len(serialized_header) > RudpMessage.DATASIZE:
-            offset = RudpMessage.DATASIZE - len(serialized_header)
-            first_message = serialized_header + file_data[:offset]
-            self.sender.send(first_message)
-
-            while offset < len(file_data):
-                next_message_size = min(len(file_data) - offset, RudpMessage.DATASIZE)
-                next_message = file_data[offset:offset+next_message_size]
-                self.sender.send(next_message)
-                offset += next_message_size
-
-        else:
-            self.sender.send(serialized_header + file_data)
-
-
-class KftpReceiver:
-    def __init__(self, receiver: RudpReceiver):
-        self.receiver = receiver
-
-    def receive(self) -> bytes:
-        first_message = self.receiver.receive()
-        header = KftpHeader.deserialize(first_message)
-        file_data = first_message[4:]
-
-        while len(file_data) < header.data_size:
-            next_message = self.receiver.receive()
-            file_data += next_message
-
-        return file_data
 
 
 class Client:
@@ -205,8 +20,8 @@ class Client:
     def __init__(self, sock: Socket):
         sock.sock.settimeout(self.SOCKET_TIMEOUT)
         self.sock = sock
-        self.sender = RudpSender(self.sock)
-        self.receiver = RudpReceiver(self.sock)
+        self.sender = RudpSender(self.sock, (address, port))
+        self.receiver = RudpReceiver(self.sock, (address, port))
 
     def get(self, filename: str) -> bytes:
         self.send(f"get {filename}".encode())
