@@ -47,6 +47,7 @@ void handle_response(SocketInfo *sock_info) {
         error("ERROR in recvfrom");
 
     printf("\n");
+    fflush(stdout);
 
     if (!did_recv_any)
         error("Timeout before receiving any data");
@@ -105,7 +106,15 @@ int main(int argc, char **argv) {
                "\texit\n"
                "> "
         );
-        fgets(buf, BUFSIZE, stdin);
+        fflush(stdout);
+        char* result = fgets(buf, BUFSIZE, stdin);
+        if (result == NULL) {
+            if (ferror(stdin) != 0)
+                error("ERROR in fgets");
+            else
+                // could not read any characters
+                continue;
+        }
 
         /* send the message to the server */
         n = sendto(sockfd, buf, strlen(buf), 0, (struct sockaddr *) &serveraddr, serverlen);
