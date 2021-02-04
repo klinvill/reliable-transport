@@ -58,10 +58,6 @@ int main(int argc, char **argv) {
 
     /* socket: create the socket */
     sockfd = socket(AF_INET, SOCK_DGRAM, 0);
-    struct timeval recv_timeout;
-    recv_timeout.tv_usec = RECV_TIMEOUT;
-    if (setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, &recv_timeout, sizeof(recv_timeout)))
-        error("ERROR setting receive timout for socket");
     if (sockfd < 0)
         error("ERROR opening socket");
 
@@ -82,7 +78,7 @@ int main(int argc, char **argv) {
     serverlen = sizeof(serveraddr);
     SocketInfo sock_info = {.sockfd=sockfd, .addr=(struct sockaddr *) &serveraddr, .addr_len=serverlen};
 
-    RudpSender sender = {.sender_timeout=SENDER_TIMEOUT};
+    RudpSender sender = {.sender_timeout=SENDER_TIMEOUT, .message_timeout=INITIAL_TIMEOUT};
     RudpReceiver receiver = {};
 
     while (1) {

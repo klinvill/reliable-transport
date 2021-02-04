@@ -63,6 +63,9 @@ class RudpReceiver:
                 self.last_received += 1
                 self.send_ack(recv_message.header.seq_num, addr)
                 return recv_message.data, addr
+            # ack previously received messages in case the ack hasn't yet been received by the sender
+            elif recv_message.header.seq_num == self.last_received:
+                self.send_ack(recv_message.header.seq_num, addr)
 
     def send_ack(self, ack_num: int, addr: Tuple[str, int]):
         message = RudpMessage(RudpHeader(0, ack_num, 0), b'')

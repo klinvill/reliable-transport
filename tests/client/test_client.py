@@ -3,8 +3,8 @@ import subprocess
 import pytest
 import socket
 import multiprocessing
-import time
 from typing import Generator, Tuple
+from pathlib import Path
 
 from tests.e2e_utils.socket_utils import Socket
 from tests.e2e_utils.rudp_utils import RudpReceiver, RudpSender
@@ -14,11 +14,21 @@ port = 8080
 server_bufsize = 1024
 kill_server_timeout = 0.5     # in seconds
 
-big_response_file = "./tests/resources/foo1"
+resources_filepath = Path("tests/resources/")
 
 
 class Client:
     read_timeout = 1
+
+    expected_prompt_lines = [
+        b'Please enter one of the following messages: \n',
+        b'\tget <file_name>\n',
+        b'\tput <file_name>\n',
+        b'\tdelete <file_name>\n',
+        b'\tls\n',
+        b'\texit\n',
+    ]
+    prompt_marker = b"> "
 
     def __init__(self, proc: asyncio.subprocess.Process):
         self.proc = proc
@@ -32,21 +42,11 @@ class Client:
         return Client(proc)
 
     async def expect_prompt(self):
-        expected_prompt_lines = [
-            b'Please enter one of the following messages: \n',
-            b'\tget <file_name>\n',
-            b'\tput <file_name>\n',
-            b'\tdelete <file_name>\n',
-            b'\tls\n',
-            b'\texit\n',
-        ]
-        prompt_marker = b"> "
-
-        for i in range(len(expected_prompt_lines)):
+        for i in range(len(self.expected_prompt_lines)):
             line = await asyncio.wait_for(self.proc.stdout.readline(), timeout=self.read_timeout)
-            assert line == expected_prompt_lines[i]
-        marker = await asyncio.wait_for(self.proc.stdout.readexactly(len(prompt_marker)), timeout=self.read_timeout)
-        assert marker == prompt_marker
+            assert line == self.expected_prompt_lines[i]
+        marker = await asyncio.wait_for(self.proc.stdout.readexactly(len(self.prompt_marker)), timeout=self.read_timeout)
+        assert marker == self.prompt_marker
 
     async def check_errors(self):
         try:
@@ -74,6 +74,19 @@ class Client:
             result += await asyncio.wait_for(self.proc.stdout.readline(), timeout=self.read_timeout)
         return result
 
+    async def read_available_lines(self, timeout=read_timeout, trim_prompt=True):
+        result = b''
+        while True:
+            try:
+                result += await asyncio.wait_for(self.proc.stdout.readline(), timeout=timeout)
+            except asyncio.TimeoutError:
+                break
+
+        if trim_prompt:
+            result = result.removesuffix(b''.join(self.expected_prompt_lines))
+
+        return result
+
 
 @pytest.fixture
 async def client() -> Generator[Client, None, None]:
@@ -82,11 +95,53 @@ async def client() -> Generator[Client, None, None]:
     await c.close()
 
 
-class Server:
+class Server(multiprocessing.Process):
+    mock_ls_response = b'.git\nfoo\nbar\n'
+    mock_exit_response = b'Exiting gracefully\n'
+    mock_delete_response = b'Deleted file\n'
+
     def __init__(self, sock: Socket):
+        super().__init__()
         self.sock = sock
         self.receiver = RudpReceiver(self.sock)
         self.sender = RudpSender(self.sock, self.receiver)
+
+    def handle_command(self, command: bytes, from_addr: Tuple[str, int]):
+        command_type = command.split()[0]
+        if command_type == b"get":
+            self.handle_get(command, from_addr)
+        elif command_type == b"put":
+            self.handle_put(command, from_addr)
+        elif command_type == b"delete":
+            self.handle_delete(from_addr)
+        elif command_type == b"ls":
+            self.handle_ls(from_addr)
+        elif command_type == b"exit":
+            self.handle_exit(from_addr)
+
+    def handle_get(self, command, from_addr):
+        filename = command.split()[1].decode()
+        filepath = resources_filepath.joinpath(filename)
+        with open(filepath, "rb") as f:
+            response = f.read()
+        self.send_to(response, from_addr)
+
+    def handle_put(self, command, from_addr):
+        filename = command.split()[1].decode()
+        filepath = resources_filepath.joinpath(filename)
+        data, addr = self.receive_from()
+        assert addr == from_addr
+        with open(filepath, "wb") as f:
+            f.write(data)
+
+    def handle_delete(self, from_addr: Tuple[str, int]):
+        self.send_to(self.mock_delete_response, from_addr)
+
+    def handle_ls(self, from_addr: Tuple[str, int]):
+        self.send_to(self.mock_ls_response, from_addr)
+
+    def handle_exit(self, from_addr: Tuple[str, int]):
+        self.send_to(self.mock_exit_response, from_addr)
 
     def send_to(self, message: bytes, addr: Tuple[str, int]):
         self.sender.send_to(message, addr)
@@ -94,99 +149,96 @@ class Server:
     def receive_from(self) -> Tuple[bytes, Tuple[str, int]]:
         return self.receiver.receive_from()
 
-
-class EchoServer(Server, multiprocessing.Process):
-    def __init__(self, sock: Socket):
-        Server.__init__(self, sock)
-        multiprocessing.Process.__init__(self)
-
-    def run(self):
-        with open("test_log.txt", "w") as f:
-            f.write("Starting server...\n")
-            while True:
-                data, addr = self.receive_from()
-                f.write(f"Received: {data}\n")
-                f.flush()
-                self.send_to(data, addr)
-                f.write(f"Sent: {data}\n")
-                f.flush()
-
-
-class BigResponseServer(Server, multiprocessing.Process):
-    chunk_size = 1024
-
-    def __init__(self, sock: Socket):
-        Server.__init__(self, sock)
-        multiprocessing.Process.__init__(self)
-
-        with open(big_response_file, "rb") as f:
-            self.response = f.read()
-
-        self.lines = self.response.count(b'\n')
-
     def run(self):
         while True:
-            data, sender = self.receive_from()
-            for i in range(int((len(self.response) - 1) / self.chunk_size + 1)):
-                self.send_to(self.response[i * self.chunk_size:(i+1) * self.chunk_size], sender)
-
-
-class ResponseDetails:
-    def __init__(self, lines: int):
-        self.lines = lines
+            command, addr = self.receive_from()
+            self.handle_command(command, addr)
 
 
 @pytest.fixture
-def echo_server():
+def server():
     with socket.socket(type=socket.SOCK_DGRAM) as sock:
         sock.bind((address, port))
 
-        server = EchoServer(Socket(sock))
-        server.start()
-        time.sleep(0.2)
+        serv = Server(Socket(sock))
+        serv.start()
         yield
-        server.terminate()
-        server.join(kill_server_timeout)
-
-
-@pytest.fixture
-def big_response_server() -> Generator[ResponseDetails, None, None]:
-    with socket.socket(type=socket.SOCK_DGRAM) as sock:
-        sock.bind((address, port))
-
-        server = BigResponseServer(Socket(sock))
-        server.start()
-        time.sleep(0.2)
-        yield ResponseDetails(server.lines)
-        server.terminate()
-        server.join(kill_server_timeout)
+        serv.terminate()
+        serv.join(kill_server_timeout)
 
 
 class TestClient:
+    @pytest.mark.xfail(reason="Need to use kftp to send and receive more data than can fit in a single rudp message")
     @pytest.mark.asyncio
-    async def test_client_retrieves_response(self, client: Client, echo_server: None):
-        command = b"foo\n"
-        expected_response = command
-
-        await client.expect_prompt()
-
-        await client.send_input(command)
-        response = await client.readline()
-        await client.check_errors()
-
-        assert response == expected_response
-
-    @pytest.mark.xfail(reason="Should make sure client and server communication across multiple messages is done through kftp")
-    @pytest.mark.asyncio
-    async def test_client_retrieves_large_response(self, client: Client, big_response_server: ResponseDetails):
-        command = b"foo\n"
-        with open(big_response_file, "rb") as f:
+    async def test_get(self, client: Client, server: None):
+        test_file = "foo1"
+        command = f"get {test_file}\n".encode()
+        with open(resources_filepath.joinpath(test_file), "rb") as f:
             expected_response = f.read()
 
         await client.expect_prompt()
 
         await client.send_input(command)
-        response = await client.readlines(big_response_server.lines)
+        response = await client.read_available_lines()
         await client.check_errors()
 
-        assert response == expected_response
+        assert response.rstrip() == expected_response.rstrip()
+
+    @pytest.mark.xfail(reason="Need to implement put for client")
+    @pytest.mark.asyncio
+    async def test_put(self, client: Client, server: None):
+        input_file = "foo1"
+        test_file = f"test_{input_file}"
+        command = f"put {test_file}\n".encode()
+
+        with open(resources_filepath.joinpath(input_file), "rb") as f:
+            expected_contents = f.read()
+
+        await client.expect_prompt()
+
+        await client.send_input(command)
+        await client.check_errors()
+
+        with open(resources_filepath.joinpath(test_file), "rb") as f:
+            test_contents = f.read()
+
+        assert test_contents == expected_contents
+
+    @pytest.mark.asyncio
+    async def test_delete(self, client: Client, server: None):
+        command = b"delete\n"
+        expected_response = Server.mock_delete_response
+
+        await client.expect_prompt()
+
+        await client.send_input(command)
+        response = await client.read_available_lines()
+        await client.check_errors()
+
+        assert response.rstrip() == expected_response.rstrip()
+
+    @pytest.mark.asyncio
+    async def test_ls(self, client: Client, server: None):
+        command = b"ls\n"
+        expected_response = Server.mock_ls_response
+
+        await client.expect_prompt()
+
+        await client.send_input(command)
+        response = await client.read_available_lines()
+        await client.check_errors()
+
+        assert response.rstrip() == expected_response.rstrip()
+
+    @pytest.mark.asyncio
+    async def test_exit(self, client: Client, server: None):
+        command = b"exit\n"
+        expected_response = Server.mock_exit_response
+
+        await client.expect_prompt()
+
+        await client.send_input(command)
+        response = await client.read_available_lines()
+        await client.check_errors()
+
+        assert response.rstrip() == expected_response.rstrip()
