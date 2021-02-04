@@ -20,16 +20,17 @@ class Client:
     def __init__(self, sock: Socket):
         sock.sock.settimeout(self.SOCKET_TIMEOUT)
         self.sock = sock
-        self.sender = RudpSender(self.sock, (address, port))
-        self.receiver = RudpReceiver(self.sock, (address, port))
+        self.receiver = RudpReceiver(self.sock)
+        self.sender = RudpSender(self.sock, self.receiver)
 
     def get(self, filename: str) -> bytes:
         self.send(f"get {filename}".encode())
-        return KftpReceiver(self.receiver).receive()
+        data, _ = KftpReceiver(self.receiver).receive_from()
+        return data
 
     def put(self, filename: str, data: bytes):
         self.send(f"put {filename}".encode())
-        return KftpSender(self.sender).send(data)
+        return KftpSender(self.sender).send_to(data, (address, port))
 
     def delete(self, filename: str) -> bytes:
         return self.send_and_receive(f"delete {filename}".encode())
@@ -41,10 +42,11 @@ class Client:
         return self.send_and_receive(b"exit")
 
     def send(self, data: bytes):
-        self.sender.send(data)
+        self.sender.send_to(data, (address, port))
 
     def receive(self) -> bytes:
-        return self.receiver.receive()
+        data, _ = self.receiver.receive_from()
+        return data
 
     def send_and_receive(self, data: bytes) -> bytes:
         self.send(data)

@@ -13,6 +13,8 @@
 #include <stdbool.h>
 #include <sys/errno.h>
 
+#include "../common/reliable_udp/reliable_udp.h"
+
 #define BUFSIZE 1024
 // TODO: what should the recv_timeout be?
 #define RECV_TIMEOUT 500000    // in microseconds
@@ -25,32 +27,17 @@ void error(char *msg) {
     exit(0);
 }
 
-typedef struct {
-    int sockfd;
-    struct sockaddr *serveraddr;
-    socklen_t serverlen;
-} SocketInfo;
-
-void handle_response(SocketInfo *sock_info) {
-    int n = 0;
+void handle_response(SocketInfo *sock_info, RudpReceiver *receiver) {
+    int n;
     char buf[BUFSIZE];
 
-    bool did_recv_any = false;
-
-    while ((n = recvfrom(sock_info->sockfd, buf, BUFSIZE, 0, sock_info->serveraddr, &sock_info->serverlen)) > 0) {
-        did_recv_any = true;
-        buf[n] = 0;
-        printf("%s", buf);
-    }
-
-    if (n < 0 && errno != EWOULDBLOCK)
+    n = rudp_recv(buf, BUFSIZE, sock_info, receiver);
+    if (n < 0)
         error("ERROR in recvfrom");
 
-    printf("\n");
+    buf[n] = 0;
+    printf("%s\n", buf);
     fflush(stdout);
-
-    if (!did_recv_any)
-        error("Timeout before receiving any data");
 }
 
 int main(int argc, char **argv) {
@@ -93,7 +80,10 @@ int main(int argc, char **argv) {
     serveraddr.sin_port = htons(portno);
 
     serverlen = sizeof(serveraddr);
-    SocketInfo sock_info = {.sockfd=sockfd, .serveraddr=(struct sockaddr *) &serveraddr, .serverlen=serverlen};
+    SocketInfo sock_info = {.sockfd=sockfd, .addr=(struct sockaddr *) &serveraddr, .addr_len=serverlen};
+
+    RudpSender sender = {.sender_timeout=SENDER_TIMEOUT};
+    RudpReceiver receiver = {};
 
     while (1) {
         /* get a message from the user */
@@ -116,11 +106,11 @@ int main(int argc, char **argv) {
                 continue;
         }
 
-        /* send the message to the server */
-        n = sendto(sockfd, buf, strlen(buf), 0, (struct sockaddr *) &serveraddr, serverlen);
+        /* send the command to the server */
+        rudp_send(buf, strlen(buf), &sock_info, &sender, &receiver);
         if (n < 0)
-            error("ERROR in sendto");
+            error("ERROR in rudp_send");
 
-        handle_response(&sock_info);
+        handle_response(&sock_info, &receiver);
     }
 }

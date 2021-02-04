@@ -45,21 +45,46 @@ class RudpMessage:
         return RudpMessage(header, data[12:])
 
 
+class RudpReceiver:
+    def __init__(self, sock: Socket, last_received: int = 0):
+        self.sock = sock
+        self.last_received = last_received
+
+    def receive_from(self) -> Tuple[bytes, Tuple[str, int]]:
+        while True:
+            try:
+                (data, addr) = self.sock.recvfrom(RudpMessage.BUFSIZE)
+            except socket.timeout:
+                return b'', ('', 0)
+
+            recv_message = RudpMessage.deserialize(data)
+            print(f"Received message with seq header: {recv_message.header.seq_num}, looking for: {self.last_received+1}")
+            if recv_message.header.seq_num == self.last_received + 1:
+                self.last_received += 1
+                self.send_ack(recv_message.header.seq_num, addr)
+                return recv_message.data, addr
+
+    def send_ack(self, ack_num: int, addr: Tuple[str, int]):
+        message = RudpMessage(RudpHeader(0, ack_num, 0), b'')
+        print(f"Sending ack: {ack_num} to: {addr}")
+        self.sock.sendto(message.serialize(), addr)
+
+
 class RudpSender:
     timeout_retries = 5
 
-    def __init__(self, sock: Socket, s_addr: Tuple[str, int], last_ack: int = 0):
+    def __init__(self, sock: Socket, receiver: RudpReceiver, last_ack: int = 0):
         self.sock = sock
-        self.s_addr = s_addr
+        self.receiver = receiver
         self.last_ack = last_ack
 
-    def send(self, data: bytes):
+    def send_to(self, data: bytes, to_addr: Tuple[str, int]):
         message = RudpMessage(RudpHeader(self.last_ack + 1, 0, len(data)), data)
 
         counter = 0
         acked = False
         while not acked:
-            self.sock.sendto(message.serialize(), self.s_addr)
+            self.sock.sendto(message.serialize(), to_addr)
             try:
                 (recv_data, addr) = self.sock.recvfrom(RudpMessage.BUFSIZE)
             except socket.timeout as err:
@@ -70,33 +95,12 @@ class RudpSender:
                 else:
                     raise err
             print(f"Checked for ack: {recv_data}")
-            if addr == self.s_addr:
+            if addr == to_addr:
                 recv_message = RudpMessage.deserialize(recv_data)
                 if recv_message.header.ack_num == self.last_ack + 1:
                     print(f"Acked: {recv_message.header.ack_num}")
                     self.last_ack += 1
                     acked = True
-
-
-class RudpReceiver:
-    def __init__(self, sock: Socket, s_addr: Tuple[str, int], last_received: int = 0):
-        self.sock = sock
-        self.s_addr = s_addr
-        self.last_received = last_received
-
-    def receive(self) -> bytes:
-        while True:
-            try:
-                (data, addr) = self.sock.recvfrom(RudpMessage.BUFSIZE)
-            except socket.timeout:
-                return b''
-            if addr == self.s_addr:
-                recv_message = RudpMessage.deserialize(data)
-                if recv_message.header.seq_num == self.last_received + 1:
-                    self.last_received += 1
-                    self.send_ack(recv_message.header.seq_num)
-                    return recv_message.data
-
-    def send_ack(self, ack_num: int):
-        message = RudpMessage(RudpHeader(0, ack_num, 0), b'')
-        self.sock.sendto(message.serialize(), self.s_addr)
+                # ack previously received messages in case the ack hasn't yet been received
+                elif recv_message.header.seq_num == self.receiver.last_received:
+                    self.receiver.send_ack(recv_message.header.seq_num, addr)
