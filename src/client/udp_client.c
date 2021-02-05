@@ -69,7 +69,24 @@ void do_exit(SocketInfo *socket_info, RudpSender *sender, RudpReceiver *receiver
 }
 
 int do_get(char* filename, SocketInfo *socket_info, RudpSender *sender, RudpReceiver *receiver) {
-    return -1;
+    char command[BUFSIZE] = {};
+    int n = snprintf(command, BUFSIZE, "get %s", filename);
+    if (n >= BUFSIZE)
+        error("ERROR in sprintf");
+
+    n = rudp_send(command, strlen(command), socket_info, sender, receiver);
+    if (n < 0)
+        error("ERROR in rudp_send");
+
+    FILE* fetched_file = fopen(filename, "w");
+    int result = kftp_recv_file(fetched_file, socket_info, receiver);
+    fclose(fetched_file);
+
+    if (result < 0)
+        error("ERROR while downloading file");
+
+    printf("Downloaded file: %s\n", filename);
+    return result;
 }
 
 int do_put(char* filename, SocketInfo *socket_info, RudpReceiver *receiver) {

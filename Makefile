@@ -2,7 +2,7 @@ all: client server
 
 client: src/client/udp_client.c .c.o
 	mkdir -p out/client
-	gcc src/client/udp_client.c -o out/client/client out/common/reliable_udp/reliable_udp.o out/common/reliable_udp/serde.o out/common/utils.o
+	gcc src/client/udp_client.c -o out/client/client out/common/reliable_udp/reliable_udp.o out/common/reliable_udp/serde.o out/common/utils.o out/common/kftp/kftp.o out/common/kftp/kftp_serde.o
 
 server: src/server/udp_server.c .c.o
 	mkdir -p out/server

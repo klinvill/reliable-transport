@@ -8,6 +8,7 @@ from pathlib import Path
 
 from tests.e2e_utils.socket_utils import Socket
 from tests.e2e_utils.rudp_utils import RudpReceiver, RudpSender
+from tests.e2e_utils.kftp_utils import KftpReceiver, KftpSender
 
 address = "127.0.0.1"
 port = 8080
@@ -102,6 +103,8 @@ async def client() -> Generator[Client, None, None]:
 class Server(multiprocessing.Process):
     mock_ls_response = b'.git\nfoo\nbar\n'
     mock_exit_response = b'Exiting gracefully\n'
+    mock_file_contents = b"Hello world!\nGoodbye...\n"
+    sample_files = ["foo1", "foo2", "foo3"]
 
     @staticmethod
     def mock_delete_response(filename: str) -> bytes:
@@ -127,11 +130,15 @@ class Server(multiprocessing.Process):
             self.handle_exit(from_addr)
 
     def handle_get(self, command: bytes, from_addr: Tuple[str, int]):
+        contents = self.mock_file_contents
         filename = command.split()[1].decode()
-        filepath = resources_filepath.joinpath(filename)
-        with open(filepath, "rb") as f:
-            response = f.read()
-        self.send_to(response, from_addr)
+        for file in self.sample_files:
+            if filename == str(resources_filepath.joinpath(f"test_{file}")):
+                with open(resources_filepath.joinpath(file), "rb") as f:
+                    contents = f.read()
+                break
+
+        return KftpSender(self.sender).send_to(contents, from_addr)
 
     def handle_put(self, command: bytes, from_addr: Tuple[str, int]):
         filename = command.split()[1].decode()
@@ -176,13 +183,13 @@ def server():
 
 
 class TestClient:
-    @pytest.mark.xfail(reason="Need to use kftp to send and receive more data than can fit in a single rudp message")
     @pytest.mark.asyncio
     async def test_get(self, client: Client, server: None):
-        test_file = "foo1"
-        command = f"get {test_file}\n".encode()
-        with open(resources_filepath.joinpath(test_file), "rb") as f:
-            expected_response = f.read()
+        test_file = "test.txt"
+        test_filepath = resources_filepath.joinpath(test_file)
+        command = f"get {test_filepath}\n".encode()
+        expected_contents = Server.mock_file_contents
+        expected_response = f"Downloaded file: {test_filepath}\n".encode()
 
         await client.expect_prompt()
 
@@ -190,7 +197,40 @@ class TestClient:
         response = await client.read_available_lines()
         await client.check_errors()
 
+        with open(test_filepath, "rb") as f:
+            contents = f.read()
+
         assert response.rstrip() == expected_response.rstrip()
+        assert contents == expected_contents
+
+        test_filepath.unlink()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("file", Server.sample_files)
+    async def test_get_sample_files(self, client: Client, server: None, file: str):
+        """Tests the sample files provided for this homework assignment"""
+        filepath = resources_filepath.joinpath(file)
+        test_file = f"test_{file}"
+        test_filepath = resources_filepath.joinpath(test_file)
+        command = f"get {test_filepath}\n".encode()
+
+        with open(filepath, "rb") as f:
+            expected_contents = f.read()
+        expected_response = f"Downloaded file: {test_filepath}\n".encode()
+
+        await client.expect_prompt()
+
+        await client.send_input(command)
+        response = await client.read_available_lines()
+        await client.check_errors()
+
+        with open(test_filepath, "rb") as f:
+            contents = f.read()
+
+        assert response.rstrip() == expected_response.rstrip()
+        assert contents == expected_contents
+
+        test_filepath.unlink()
 
     @pytest.mark.xfail(reason="Need to implement put for client")
     @pytest.mark.asyncio
@@ -250,4 +290,6 @@ class TestClient:
         response = await client.read_available_lines()
         await client.check_errors()
 
+        # The exit message should cause the client to exit as well
+        assert client.proc.returncode == 0
         assert response.rstrip() == expected_response.rstrip()
