@@ -23,10 +23,10 @@ class UnreliableSocket(Socket):
         # being received, or the original message being dropped during transmission. This shouldnt cause the parsers to
         # crash since they should only look at the header which will contain sequence/ack numbers that are not expected.
         flipped_data = bytes([d ^ 0xff for d in data])
-        print(f"Sending (flipped): {flipped_data}")
+        print(f"Sending (flipped): {flipped_data}", flush=True)
         self.sock.sendto(flipped_data, s_address)
 
-        print(f"Sending: {data}")
+        print(f"Sending: {data}", flush=True)
         return self.sock.sendto(data, s_address)
 
     def recvfrom(self, bufsize: int) -> Tuple[bytes, Tuple[str, int]]:
@@ -34,9 +34,9 @@ class UnreliableSocket(Socket):
         if self.recv_counter % 2 == 0:
             (result, from_address) = self.sock.recvfrom(bufsize)
             self.recv_counter += 1
-            print(f"Received (ignoring): {(result, from_address)}")
+            print(f"Received (ignoring): {(result, from_address)}", flush=True)
 
         (result, from_address) = self.sock.recvfrom(bufsize)
         self.recv_counter += 1
-        print(f"Received: {(result, from_address)}")
+        print(f"Received: {(result, from_address)}", flush=True)
         return (result, from_address)

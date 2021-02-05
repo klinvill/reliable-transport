@@ -30,8 +30,10 @@ int ack(RudpMessage* received_message, SocketInfo* from) {
 
     char wire_data[MAX_PAYLOAD_SIZE] = {0,};
     int wire_data_len = serialize(&ack_message, wire_data, MAX_PAYLOAD_SIZE);
-    if (wire_data_len < 0)
+    if (wire_data_len < 0) {
+        fprintf(stderr, "Error serializing ack message\n");
         return wire_data_len;
+    }
 
     return sendto(from->sockfd, wire_data, wire_data_len, 0, from->addr, from->addr_len);
 }
@@ -102,7 +104,7 @@ int rudp_send_chunk(char* data, int data_size, SocketInfo* to, RudpSender* sende
             int deserialized = deserialize(buffer, MAX_PAYLOAD_SIZE, &received_message);
 
             if (deserialized < 0) {
-                fprintf(stderr, "Deserialization error %d, ignoring message\n", deserialized);
+                fprintf(stderr, "Deserialization error %d in rudp_send_chunk, ignoring message\n", deserialized);
                 continue;
             }
 
@@ -150,6 +152,7 @@ int rudp_handle_received_message(RudpMessage* received_message, char* buffer, in
 
     // TODO: error handling
     if (received_message->header.data_size > buffer_size) {
+        fprintf(stderr, "Received message's payload too large for buffer\n");
         ret_code = -1;
         goto dealloc;
     }
@@ -192,7 +195,7 @@ int rudp_recv(char* buffer, int buffer_size, SocketInfo* from, RudpReceiver* rec
         int deserialized = deserialize(buffer, buffer_size, &received_message);
         // TODO: error handling
         if (deserialized < 0) {
-            fprintf(stderr, "Deserialization error %d, ignoring message\n", deserialized);
+            fprintf(stderr, "Deserialization error %d in rudp_recv, ignoring message\n", deserialized);
             continue;
         }
 

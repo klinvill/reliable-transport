@@ -105,8 +105,10 @@ int kftp_recv_file(FILE* write_fp, SocketInfo* from, RudpReceiver * receiver) {
         assert(received_bytes > 0);
         written_chunk_size = fwrite(rudp_buffer, sizeof(char), received_bytes, write_fp);
         // TODO: error handling
-        if (written_chunk_size != received_bytes)
+        if (written_chunk_size != received_bytes) {
+            fprintf(stderr, "Written chunk size (%zu) does not match received_bytes (%d)\n", written_chunk_size, received_bytes);
             return -1;
+        }
         remaining_bytes -= received_bytes;
     }
 

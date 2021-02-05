@@ -79,6 +79,8 @@ int do_get(char* filename, SocketInfo *socket_info, RudpSender *sender, RudpRece
         error("ERROR in rudp_send");
 
     FILE* fetched_file = fopen(filename, "w");
+    if (fetched_file == NULL)
+        error("ERROR opening file to write to");
     int result = kftp_recv_file(fetched_file, socket_info, receiver);
     fclose(fetched_file);
 
@@ -100,6 +102,8 @@ int do_put(char* filename, SocketInfo *socket_info, RudpSender *sender, RudpRece
         error("ERROR in rudp_send");
 
     FILE* file = fopen(filename, "r");
+    if (file == NULL)
+        error("ERROR opening file to send");
     int result = kftp_send_file(file, socket_info, sender, receiver);
     fclose(file);
 
