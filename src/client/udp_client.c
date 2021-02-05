@@ -14,10 +14,12 @@
 #include <sys/errno.h>
 
 #include "../common/reliable_udp/reliable_udp.h"
+#include "../common/kftp/kftp.h"
 
 #define BUFSIZE 1024
-// TODO: what should the recv_timeout be?
-#define RECV_TIMEOUT 500000    // in microseconds
+#define DELIMITERS " \n\t\r\v\f"
+
+#define PARSE_ERROR (-2)
 
 /* 
  * error - wrapper for perror
@@ -27,7 +29,7 @@ void error(char *msg) {
     exit(0);
 }
 
-void handle_response(SocketInfo *sock_info, RudpReceiver *receiver) {
+int handle_response(SocketInfo *sock_info, RudpReceiver *receiver) {
     int n;
     char buf[BUFSIZE];
 
@@ -38,6 +40,89 @@ void handle_response(SocketInfo *sock_info, RudpReceiver *receiver) {
     buf[n] = 0;
     printf("%s\n", buf);
     fflush(stdout);
+
+    return n;
+}
+
+int do_ls(SocketInfo *socket_info, RudpSender *sender, RudpReceiver *receiver) {
+    char* command = "ls";
+
+    int n = rudp_send(command, strlen(command), socket_info, sender, receiver);
+    if (n < 0)
+        error("ERROR in rudp_send");
+
+    return handle_response(socket_info, receiver);
+}
+
+void do_exit(SocketInfo *socket_info, RudpSender *sender, RudpReceiver *receiver) {
+    char* command = "exit";
+
+    int n = rudp_send(command, strlen(command), socket_info, sender, receiver);
+    if (n < 0)
+        error("ERROR in rudp_send");
+
+    n = handle_response(socket_info, receiver);
+    if (n < 0)
+        error("ERROR in handle_response");
+
+    exit(0);
+}
+
+int do_get(char* filename, SocketInfo *socket_info, RudpSender *sender, RudpReceiver *receiver) {
+    return -1;
+}
+
+int do_put(char* filename, SocketInfo *socket_info, RudpReceiver *receiver) {
+    return -1;
+}
+
+int do_delete(char* filename, SocketInfo *socket_info, RudpSender *sender, RudpReceiver *receiver) {
+    char command[BUFSIZE] = {};
+    int n = snprintf(command, BUFSIZE, "delete %s", filename);
+    if (n >= BUFSIZE || n == 0)
+        error("ERROR in sprintf");
+
+    n = rudp_send(command, strlen(command), socket_info, sender, receiver);
+    if (n < 0)
+        error("ERROR in rudp_send");
+
+    return handle_response(socket_info, receiver);
+}
+
+
+int process_command(char *message, SocketInfo *socket_info, RudpSender *sender, RudpReceiver *receiver) {
+    char *first_token = strtok(message, DELIMITERS);
+    if (!first_token) return PARSE_ERROR;
+
+    char *second_token = strtok(NULL, DELIMITERS);
+
+    // single arg commands
+    if (strcmp(first_token, "ls") == 0 || strcmp(first_token, "exit") == 0) {
+        // only one argument allowed
+        if (second_token) return PARSE_ERROR;
+
+        if (strcmp(first_token, "ls") == 0)
+            return do_ls(socket_info, sender, receiver);
+        else if (strcmp(first_token, "exit") == 0)
+            do_exit(socket_info, sender, receiver);
+    }
+
+    // double arg commands
+    {
+        if (!second_token) return PARSE_ERROR;
+
+        // there are no commands that take 3 arguments
+        if (strtok(NULL, DELIMITERS)) return PARSE_ERROR;
+
+        if (strcmp(first_token, "get") == 0)
+            return do_get(second_token, socket_info, sender, receiver);
+        else if (strcmp(first_token, "put") == 0)
+            return do_put(second_token, socket_info, receiver);
+        else if (strcmp(first_token, "delete") == 0)
+            return do_delete(second_token, socket_info, sender, receiver);
+    }
+
+    return PARSE_ERROR;
 }
 
 int main(int argc, char **argv) {
@@ -102,11 +187,8 @@ int main(int argc, char **argv) {
                 continue;
         }
 
-        /* send the command to the server */
-        rudp_send(buf, strlen(buf), &sock_info, &sender, &receiver);
-        if (n < 0)
-            error("ERROR in rudp_send");
-
-        handle_response(&sock_info, &receiver);
+        int status = process_command(buf, &sock_info, &sender, &receiver);
+        if (status < 0)
+            error("ERROR in process_command");
     }
 }

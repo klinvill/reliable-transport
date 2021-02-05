@@ -49,11 +49,14 @@ class Client:
         assert marker == self.prompt_marker
 
     async def check_errors(self):
-        try:
-            err = await asyncio.wait_for(self.proc.stderr.readline(), timeout=self.read_timeout)
-            print(f"Errors: {err}")
-        except asyncio.TimeoutError:
-            pass
+        while True:
+            try:
+                err = await asyncio.wait_for(self.proc.stderr.readline(), timeout=self.read_timeout)
+                if err == b'':
+                    break
+                print(f"Error: {err}")
+            except asyncio.TimeoutError:
+                break
 
     async def close(self):
         if self.proc.returncode is None:
@@ -76,7 +79,8 @@ class Client:
 
     async def read_available_lines(self, timeout=read_timeout, trim_prompt=True):
         result = b''
-        while True:
+        # stop looping if the process has exited
+        while self.proc.returncode is None:
             try:
                 result += await asyncio.wait_for(self.proc.stdout.readline(), timeout=timeout)
             except asyncio.TimeoutError:
@@ -98,7 +102,10 @@ async def client() -> Generator[Client, None, None]:
 class Server(multiprocessing.Process):
     mock_ls_response = b'.git\nfoo\nbar\n'
     mock_exit_response = b'Exiting gracefully\n'
-    mock_delete_response = b'Deleted file\n'
+
+    @staticmethod
+    def mock_delete_response(filename: str) -> bytes:
+        return f"Deleted {filename}\n".encode()
 
     def __init__(self, sock: Socket):
         super().__init__()
@@ -113,20 +120,20 @@ class Server(multiprocessing.Process):
         elif command_type == b"put":
             self.handle_put(command, from_addr)
         elif command_type == b"delete":
-            self.handle_delete(from_addr)
+            self.handle_delete(command, from_addr)
         elif command_type == b"ls":
             self.handle_ls(from_addr)
         elif command_type == b"exit":
             self.handle_exit(from_addr)
 
-    def handle_get(self, command, from_addr):
+    def handle_get(self, command: bytes, from_addr: Tuple[str, int]):
         filename = command.split()[1].decode()
         filepath = resources_filepath.joinpath(filename)
         with open(filepath, "rb") as f:
             response = f.read()
         self.send_to(response, from_addr)
 
-    def handle_put(self, command, from_addr):
+    def handle_put(self, command: bytes, from_addr: Tuple[str, int]):
         filename = command.split()[1].decode()
         filepath = resources_filepath.joinpath(filename)
         data, addr = self.receive_from()
@@ -134,8 +141,9 @@ class Server(multiprocessing.Process):
         with open(filepath, "wb") as f:
             f.write(data)
 
-    def handle_delete(self, from_addr: Tuple[str, int]):
-        self.send_to(self.mock_delete_response, from_addr)
+    def handle_delete(self, command: bytes, from_addr: Tuple[str, int]):
+        filename = command.split()[1].decode()
+        self.send_to(self.mock_delete_response(filename), from_addr)
 
     def handle_ls(self, from_addr: Tuple[str, int]):
         self.send_to(self.mock_ls_response, from_addr)
@@ -206,8 +214,9 @@ class TestClient:
 
     @pytest.mark.asyncio
     async def test_delete(self, client: Client, server: None):
-        command = b"delete\n"
-        expected_response = Server.mock_delete_response
+        test_file = "test.txt"
+        command = f"delete {test_file}\n".encode()
+        expected_response = Server.mock_delete_response(test_file)
 
         await client.expect_prompt()
 
