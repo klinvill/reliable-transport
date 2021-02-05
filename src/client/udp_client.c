@@ -89,8 +89,25 @@ int do_get(char* filename, SocketInfo *socket_info, RudpSender *sender, RudpRece
     return result;
 }
 
-int do_put(char* filename, SocketInfo *socket_info, RudpReceiver *receiver) {
-    return -1;
+int do_put(char* filename, SocketInfo *socket_info, RudpSender *sender, RudpReceiver *receiver) {
+    char command[BUFSIZE] = {};
+    int n = snprintf(command, BUFSIZE, "put %s", filename);
+    if (n >= BUFSIZE)
+        error("ERROR in sprintf");
+
+    n = rudp_send(command, strlen(command), socket_info, sender, receiver);
+    if (n < 0)
+        error("ERROR in rudp_send");
+
+    FILE* file = fopen(filename, "r");
+    int result = kftp_send_file(file, socket_info, sender, receiver);
+    fclose(file);
+
+    if (result < 0)
+        error("ERROR while sending file");
+
+    printf("Sent file: %s\n", filename);
+    return result;
 }
 
 int do_delete(char* filename, SocketInfo *socket_info, RudpSender *sender, RudpReceiver *receiver) {
@@ -134,7 +151,7 @@ int process_command(char *message, SocketInfo *socket_info, RudpSender *sender, 
         if (strcmp(first_token, "get") == 0)
             return do_get(second_token, socket_info, sender, receiver);
         else if (strcmp(first_token, "put") == 0)
-            return do_put(second_token, socket_info, receiver);
+            return do_put(second_token, socket_info, sender, receiver);
         else if (strcmp(first_token, "delete") == 0)
             return do_delete(second_token, socket_info, sender, receiver);
     }

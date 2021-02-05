@@ -100,6 +100,10 @@ async def client() -> Generator[Client, None, None]:
     await c.close()
 
 
+def filepath_to_test_filepath(filepath: Path) -> Path:
+    return filepath.parent.joinpath(f"test_{filepath.name}")
+
+
 class Server(multiprocessing.Process):
     mock_ls_response = b'.git\nfoo\nbar\n'
     mock_exit_response = b'Exiting gracefully\n'
@@ -121,7 +125,7 @@ class Server(multiprocessing.Process):
         if command_type == b"get":
             self.handle_get(command, from_addr)
         elif command_type == b"put":
-            self.handle_put(command, from_addr)
+            self.handle_put(command)
         elif command_type == b"delete":
             self.handle_delete(command, from_addr)
         elif command_type == b"ls":
@@ -140,12 +144,11 @@ class Server(multiprocessing.Process):
 
         return KftpSender(self.sender).send_to(contents, from_addr)
 
-    def handle_put(self, command: bytes, from_addr: Tuple[str, int]):
+    def handle_put(self, command: bytes):
         filename = command.split()[1].decode()
-        filepath = resources_filepath.joinpath(filename)
-        data, addr = self.receive_from()
-        assert addr == from_addr
-        with open(filepath, "wb") as f:
+        test_filepath = filepath_to_test_filepath(Path(filename))
+        data, _ = KftpReceiver(self.receiver).receive_from()
+        with test_filepath.open("wb") as f:
             f.write(data)
 
     def handle_delete(self, command: bytes, from_addr: Tuple[str, int]):
@@ -232,25 +235,55 @@ class TestClient:
 
         test_filepath.unlink()
 
-    @pytest.mark.xfail(reason="Need to implement put for client")
     @pytest.mark.asyncio
     async def test_put(self, client: Client, server: None):
         input_file = "foo1"
-        test_file = f"test_{input_file}"
-        command = f"put {test_file}\n".encode()
+        input_filepath = resources_filepath.joinpath(input_file)
+        test_filepath = filepath_to_test_filepath(input_filepath)
+        command = f"put {input_filepath}\n".encode()
 
-        with open(resources_filepath.joinpath(input_file), "rb") as f:
+        with open(input_filepath, "rb") as f:
             expected_contents = f.read()
+        expected_response = f"Sent file: {input_filepath}\n".encode()
 
         await client.expect_prompt()
 
         await client.send_input(command)
+        response = await client.read_available_lines()
         await client.check_errors()
 
-        with open(resources_filepath.joinpath(test_file), "rb") as f:
+        with open(test_filepath, "rb") as f:
             test_contents = f.read()
 
+        assert response.rstrip() == expected_response.rstrip()
         assert test_contents == expected_contents
+
+        test_filepath.unlink()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("file", Server.sample_files)
+    async def test_put_sample_files(self, client: Client, server: None, file: str):
+        input_filepath = resources_filepath.joinpath(file)
+        test_filepath = filepath_to_test_filepath(input_filepath)
+        command = f"put {input_filepath}\n".encode()
+
+        with open(input_filepath, "rb") as f:
+            expected_contents = f.read()
+        expected_response = f"Sent file: {input_filepath}\n".encode()
+
+        await client.expect_prompt()
+
+        await client.send_input(command)
+        response = await client.read_available_lines()
+        await client.check_errors()
+
+        with open(test_filepath, "rb") as f:
+            test_contents = f.read()
+
+        assert response.rstrip() == expected_response.rstrip()
+        assert test_contents == expected_contents
+
+        test_filepath.unlink()
 
     @pytest.mark.asyncio
     async def test_delete(self, client: Client, server: None):
