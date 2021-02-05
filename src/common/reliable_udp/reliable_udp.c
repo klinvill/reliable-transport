@@ -203,3 +203,64 @@ int rudp_recv(char* buffer, int buffer_size, SocketInfo* from, RudpReceiver* rec
             return status;
     }
 }
+
+// deserialized messages have a dynamically allocated data buffer that needs to be freed
+int rudp_handle_received_ack(RudpMessage* received_message, SocketInfo* from, RudpReceiver* receiver) {
+    int ret_code = 0;
+
+    // we only care about acks, will drop any other messages
+    if (!in_old_ack_window(received_message, receiver)) {
+        fprintf(stderr, "Received message not in ack window, dropping\n");
+        goto dealloc;
+    }
+
+    int status = ack(received_message, from);
+    ret_code = status;
+    // TODO: error handling
+    if (status < 0)
+        goto dealloc;
+
+    dealloc:
+    free(received_message->data);
+
+    // 0 if not acked, <0 if error, >0 if acked
+    return ret_code;
+}
+
+int rudp_check_acks(char* buffer, int buffer_size, SocketInfo* from, RudpReceiver* receiver) {
+    bool handled_ack = true;
+    int handled_acks = 0;
+
+    struct pollfd poll_fds[1];
+    poll_fds[0] = (struct pollfd) {.fd=from->sockfd, .events=POLLRDNORM};
+
+    while (handled_ack) {
+        // TODO: replace with adaptive timeout
+        int status = poll(poll_fds, 1, INITIAL_TIMEOUT);
+        // TODO: error handling
+        if (status < 0)
+            return status;
+        else if (status == 0)
+            // timed out, no acks
+            break;
+
+        int n = recvfrom(from->sockfd, buffer, buffer_size, 0, from->addr, &from->addr_len);
+        // TODO: error handling
+        if (n < 0)
+            return n;
+
+        RudpMessage received_message = {};
+        int deserialized = deserialize(buffer, buffer_size, &received_message);
+        // TODO: error handling
+        if (deserialized < 0) {
+            fprintf(stderr, "Deserialization error %d in rudp_check_acks, ignoring message\n", deserialized);
+            continue;
+        }
+
+        status = rudp_handle_received_ack(&received_message, from, receiver);
+        handled_ack = status > 0;
+        if (handled_ack)
+            handled_acks++;
+    }
+    return handled_acks;
+}

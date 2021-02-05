@@ -24,4 +24,7 @@
 int rudp_send(char* data, int data_size, SocketInfo* to, RudpSender* sender, RudpReceiver* receiver);
 int rudp_recv(char* buffer, int buffer_size, SocketInfo* from, RudpReceiver* receiver);
 
+// listens a little longer for messages and sends acks if applicable, will discard other messages
+int rudp_check_acks(char* buffer, int buffer_size, SocketInfo* from, RudpReceiver* receiver);
+
 #endif //UDP_RELIABLE_UDP_H

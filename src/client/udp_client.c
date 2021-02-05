@@ -159,6 +159,24 @@ int process_command(char *message, SocketInfo *socket_info, RudpSender *sender, 
     return PARSE_ERROR;
 }
 
+
+int run_command(char *message, SocketInfo *socket_info, RudpSender *sender, RudpReceiver *receiver) {
+    int result = process_command(message, socket_info, sender, receiver);
+
+    if (result < 0)
+        error("ERROR in process_command");
+
+    // acks to server can be lost, so it's possible to successfully finish a task without the server's
+    // knowledge. Here ee check to make sure there are no outstanding acks before considering the command complete
+    char ack_buff[BUFSIZE] = {};
+    int status = rudp_check_acks(ack_buff, BUFSIZE, socket_info, receiver);
+    if (status < 0)
+        error("ERROR in rudp_check_acks");
+
+    return result;
+}
+
+
 int main(int argc, char **argv) {
     int sockfd, portno, n;
     socklen_t serverlen;
@@ -221,8 +239,8 @@ int main(int argc, char **argv) {
                 continue;
         }
 
-        int status = process_command(buf, &sock_info, &sender, &receiver);
+        int status = run_command(buf, &sock_info, &sender, &receiver);
         if (status < 0)
-            error("ERROR in process_command");
+            error("ERROR in run_command");
     }
 }
