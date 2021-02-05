@@ -6,7 +6,7 @@ import multiprocessing
 from typing import Generator, Tuple
 from pathlib import Path
 
-from tests.e2e_utils.socket_utils import Socket
+from tests.e2e_utils.socket_utils import Socket, UnreliableSocket
 from tests.e2e_utils.rudp_utils import RudpReceiver, RudpSender
 from tests.e2e_utils.kftp_utils import KftpReceiver, KftpSender
 
@@ -105,6 +105,8 @@ def filepath_to_test_filepath(filepath: Path) -> Path:
 
 
 class Server(multiprocessing.Process):
+    SOCKET_TIMEOUT = 0.1    # in seconds
+
     mock_ls_response = b'.git\nfoo\nbar\n'
     mock_exit_response = b'Exiting gracefully\n'
     mock_file_contents = b"Hello world!\nGoodbye...\n"
@@ -168,17 +170,25 @@ class Server(multiprocessing.Process):
         return self.receiver.receive_from()
 
     def run(self):
+        self.sock.sock.settimeout(Server.SOCKET_TIMEOUT)
         while True:
             command, addr = self.receive_from()
             self.handle_command(command, addr)
 
 
-@pytest.fixture
-def server():
+@pytest.fixture(params=["reliable", "unreliable"])
+def server(request):
+    if request.param == "reliable":
+        socket_cls = Socket
+    elif request.param == "unreliable":
+        socket_cls = UnreliableSocket
+    else:
+        raise NotImplementedError("Only reliable and unreliable sockets currently supported")
+
     with socket.socket(type=socket.SOCK_DGRAM) as sock:
         sock.bind((address, port))
 
-        serv = Server(Socket(sock))
+        serv = Server(socket_cls(sock))
         serv.start()
         yield
         serv.terminate()
@@ -224,7 +234,7 @@ class TestClient:
         await client.expect_prompt()
 
         await client.send_input(command)
-        response = await client.read_available_lines()
+        response = await client.read_available_lines(timeout=5)
         await client.check_errors()
 
         with open(test_filepath, "rb") as f:
