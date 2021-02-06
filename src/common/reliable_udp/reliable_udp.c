@@ -68,7 +68,7 @@ int rudp_send_chunk(char* data, int data_size, SocketInfo* to, RudpSender* sende
         return status;
 
     struct pollfd poll_fds[1];
-    poll_fds[0] = (struct pollfd) {.fd=to->sockfd, .events=POLLRDNORM};
+    poll_fds[0] = (struct pollfd) {.fd=to->sockfd, .events=POLLIN};
 
     do {
         status = gettimeofday(&current_time, NULL);
@@ -235,7 +235,7 @@ int rudp_check_acks(char* buffer, int buffer_size, SocketInfo* from, RudpReceive
     int handled_acks = 0;
 
     struct pollfd poll_fds[1];
-    poll_fds[0] = (struct pollfd) {.fd=from->sockfd, .events=POLLRDNORM};
+    poll_fds[0] = (struct pollfd) {.fd=from->sockfd, .events=POLLIN};
 
     while (handled_ack) {
         // TODO: replace with adaptive timeout

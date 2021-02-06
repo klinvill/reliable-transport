@@ -62,13 +62,13 @@ Filenames ls_files(char *directory) {
     struct stat entry_info;
 
     while ((entry = readdir(dir)) != NULL) {
-        lstat(entry->d_name, &entry_info);
+        stat(entry->d_name, &entry_info);
         // only return files
         if (S_ISREG(entry_info.st_mode)) {
             if (i == MAX_FILES)
                 error("Too many files in directory to return them all");
 
-            size_t filename_size = entry->d_namlen + 1;
+            size_t filename_size = strlen(entry->d_name) + 1;
             char *filename = malloc(sizeof(char) * filename_size);
             strncpy(filename, entry->d_name, filename_size - 1);
             filename[filename_size - 1] = 0;
@@ -241,7 +241,7 @@ int main(int argc, char **argv) {
     /*
      * build the server's Internet address
      */
-    bzero((char *) &serveraddr, sizeof(serveraddr));
+    memset((char *) &serveraddr, 0, sizeof(serveraddr));
     serveraddr.sin_family = AF_INET;
     serveraddr.sin_addr.s_addr = htonl(INADDR_ANY);
     serveraddr.sin_port = htons((unsigned short) portno);
@@ -267,7 +267,7 @@ int main(int argc, char **argv) {
         /*
          * recvfrom: receive a UDP datagram from a client
          */
-        bzero(buf, BUFSIZE);
+        memset(buf, 0, BUFSIZE);
         // TODO: should we instead receive BUFSIZE-1 since we generally treat the buffer as a string?
         n = rudp_recv(buf, BUFSIZE, &client_socket_info, &receiver);
 

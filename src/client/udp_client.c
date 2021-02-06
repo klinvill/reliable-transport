@@ -210,10 +210,9 @@ int main(int argc, char **argv) {
     }
 
     /* build the server's Internet address */
-    bzero((char *) &serveraddr, sizeof(serveraddr));
+    memset((char *) &serveraddr, 0, sizeof(serveraddr));
     serveraddr.sin_family = AF_INET;
-    bcopy((char *) server->h_addr,
-          (char *) &serveraddr.sin_addr.s_addr, server->h_length);
+    memcpy((char *) &serveraddr.sin_addr.s_addr, (char *) server->h_addr_list[0], server->h_length);
     serveraddr.sin_port = htons(portno);
 
     serverlen = sizeof(serveraddr);
@@ -224,7 +223,7 @@ int main(int argc, char **argv) {
 
     while (1) {
         /* get a message from the user */
-        bzero(buf, BUFSIZE);
+        memset(buf, 0, BUFSIZE);
         printf("Please enter one of the following messages: \n"
                "\tget <file_name>\n"
                "\tput <file_name>\n"
