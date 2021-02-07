@@ -164,10 +164,19 @@ int process_command(char *message, SocketInfo *socket_info, RudpSender *sender, 
 }
 
 
-int run_command(char *message, SocketInfo *socket_info, RudpSender *sender, RudpReceiver *receiver) {
-    int result = process_command(message, socket_info, sender, receiver);
+int run_command(char *command, SocketInfo *socket_info, RudpSender *sender, RudpReceiver *receiver) {
+    // strtok is used to parse the strings and is destructive
+    // TODO: should implement a separate command parsing function that is shared between client and server
+    char command_copy[BUFSIZE] = {};
+    strcpy(command_copy, command);
 
-    if (result < 0)
+    int result = process_command(command, socket_info, sender, receiver);
+
+    if (result == PARSE_ERROR) {
+        printf("Invalid command: %s\n", command_copy);
+        return 0;
+    }
+    else if (result < 0)
         error("ERROR in process_command");
 
     // acks to server can be lost, so it's possible to successfully finish a task without the server's

@@ -116,6 +116,10 @@ class Server(multiprocessing.Process):
     def mock_delete_response(filename: str) -> bytes:
         return f"Deleted {filename}\n".encode()
 
+    @staticmethod
+    def mock_unrecognized_command_response(command: str) -> bytes:
+        return f"Invalid command: {command}\n".encode()
+
     def __init__(self, sock: Socket):
         super().__init__()
         self.sock = sock
@@ -335,4 +339,19 @@ class TestClient:
 
         # The exit message should cause the client to exit as well
         assert client.proc.returncode == 0
+        assert response.rstrip() == expected_response.rstrip()
+
+    @pytest.mark.asyncio
+    async def test_unrecognized_command(self, client: Client, server: None):
+        command = "foo bar\n"
+        expected_response = Server.mock_unrecognized_command_response(command)
+
+        await client.expect_prompt()
+
+        await client.send_input(command.encode())
+        response = await client.read_available_lines()
+        await client.check_errors()
+
+        # The client should still be running and expecting a new command
+        assert client.proc.returncode is None
         assert response.rstrip() == expected_response.rstrip()
