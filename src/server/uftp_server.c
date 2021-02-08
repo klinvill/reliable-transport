@@ -1,8 +1,15 @@
-/* 
- * udp_server.c - A simple UDP echo server
- * usage: udpserver <port>
- */
-
+//
+// Server for simple reliable file transfer over UDP
+//
+// Usage: server <port>
+//
+// This server uses RUDP (Reliable UDP) and KFTP (Kirby's File Transfer Protocol) to provide this functionality. This
+// work was done as a homework assignment for a networking class.
+//
+// Limitations:
+//  - The server is single-threaded
+//  - The server only expects at most one connection (it never resets tracked sequence numbers)
+//
 #include <stdio.h>
 #include <unistd.h>
 #include <stdlib.h>
@@ -18,10 +25,16 @@
 #include "../common/kftp/kftp.h"
 
 #define BUFSIZE 1024
+
+// max number of files that can be listed using the ls command
+// TODO: if we implement ls through KFTP to support an arbitrary response size, do we still need this MAX_FILES limit?
 #define MAX_FILES 100
 
+// Delimiters to use when extracting commands and arguments from user-supplied input
+// TODO: should unify client and server command parsing
 #define DELIMITERS " \n\t\r\v\f"
 
+// TODO: standardize error codes between client and server
 #define PARSE_ERROR (-2)
 #define NOT_IMPLEMENTED_ERROR (-3)
 
@@ -29,17 +42,23 @@
 /*
  * error - wrapper for perror
  */
+// TODO: replace with fatal_error, like for client
 void error(char *msg) {
     perror(msg);
     exit(1);
 }
 
 
+// Collection of filenames, created by the ls_files() function
 typedef struct {
     int count;
     char **files;
 } Filenames;
 
+
+// Cleans up the dynamically allocated memory for Filenames.
+//
+// This memory is typically allocated in the ls_files() function.
 void cleanup_filenames(Filenames *filenames) {
     for (int i = 0; i < filenames->count; i++) {
         free(filenames->files[i]);
@@ -47,8 +66,12 @@ void cleanup_filenames(Filenames *filenames) {
     free(filenames->files);
 }
 
+
 // TODO: do we need to only return files?
-// Need to cleanup the allocated memory Filenames when done
+// Returns the files in a given directory up to MAX_FILES number of files.
+//
+// This function dynamically allocates the memory required to hold the names of all the files. This memory should be
+// cleaned up using the cleanup_filenames() function.
 Filenames ls_files(char *directory) {
     char **files = malloc(sizeof(char *) * MAX_FILES);
     int i = 0;
@@ -71,6 +94,7 @@ Filenames ls_files(char *directory) {
             size_t filename_size = strlen(entry->d_name) + 1;
             char *filename = malloc(sizeof(char) * filename_size);
             strncpy(filename, entry->d_name, filename_size - 1);
+            // makes sure the filename is null terminated
             filename[filename_size - 1] = 0;
             files[i] = filename;
             i++;
@@ -81,6 +105,9 @@ Filenames ls_files(char *directory) {
 }
 
 // TODO: which parameters (for all the functions) should be const?
+// Sends a message to the client
+//
+// The message is expected to be a string
 int do_send(char *message, SocketInfo *socket_info, RudpSender *sender, RudpReceiver *receiver) {
     int status = rudp_send(message, strlen(message), socket_info, sender, receiver);
     if (status < 0)
@@ -89,6 +116,8 @@ int do_send(char *message, SocketInfo *socket_info, RudpSender *sender, RudpRece
     return status;
 }
 
+
+// Sends an error message back to the client
 void send_error(int errno, char *command, SocketInfo *socket_info, RudpSender *sender, RudpReceiver *receiver) {
     char err_buff[BUFSIZE] = {0,};
 
@@ -106,7 +135,8 @@ void send_error(int errno, char *command, SocketInfo *socket_info, RudpSender *s
     do_send(err_buff, socket_info, sender, receiver);
 }
 
-// Commands, prefixed with do_ to avoid name collisions (e.g. with exit())
+
+// Handles `get` command, that transfers a file from the server to the client
 int do_get(char *filename, SocketInfo *socket_info, RudpSender *sender, RudpReceiver *receiver) {
     FILE *f = fopen(filename, "r");
     if (f == NULL)
@@ -117,6 +147,8 @@ int do_get(char *filename, SocketInfo *socket_info, RudpSender *sender, RudpRece
     return result;
 }
 
+
+// Handles `put` command, that transfers a file from the client to the server
 int do_put(char *filename, SocketInfo *socket_info, RudpReceiver *receiver) {
     FILE *f = fopen(filename, "w");
     if (f == NULL)
@@ -127,6 +159,8 @@ int do_put(char *filename, SocketInfo *socket_info, RudpReceiver *receiver) {
     return result;
 }
 
+
+// Handles `delete` command, that deletes a file from the server
 int do_delete(char *filename, SocketInfo *socket_info, RudpSender *sender, RudpReceiver *receiver) {
     // According to given spec, we should do nothing if the file does not exist
     if (unlink(filename) == 0)
@@ -135,6 +169,10 @@ int do_delete(char *filename, SocketInfo *socket_info, RudpSender *sender, RudpR
     return 0;
 }
 
+
+// Handles `ls` command, that lists files in the current directory on the server
+//
+// Sends the list of files in the current directory back to the client, separated by a newline character
 int do_ls(SocketInfo *socket_info, RudpSender *sender, RudpReceiver *receiver) {
     Filenames filenames = ls_files(".");
     char message[BUFSIZE] = {0,};
@@ -157,7 +195,8 @@ int do_ls(SocketInfo *socket_info, RudpSender *sender, RudpReceiver *receiver) {
     return ret_code;
 }
 
-// does not return
+
+// Handles `exit` command. Does not return.
 void do_exit(SocketInfo *socket_info, RudpSender *sender, RudpReceiver *receiver) {
     char *exit_message = "Exiting gracefully";
     do_send(exit_message, socket_info, sender, receiver);
@@ -166,7 +205,12 @@ void do_exit(SocketInfo *socket_info, RudpSender *sender, RudpReceiver *receiver
     exit(0);
 }
 
+
+// Executes the proper processing based on the given command.
+//
+// This function uses strtok which will mutate the message argument.
 int process_message(char *message, SocketInfo *socket_info, RudpSender *sender, RudpReceiver *receiver) {
+    // TODO: unify command parsing with client implementation
     char *first_token = strtok(message, DELIMITERS);
     if (!first_token) return PARSE_ERROR;
 
@@ -198,6 +242,7 @@ int process_message(char *message, SocketInfo *socket_info, RudpSender *sender, 
             return do_delete(second_token, socket_info, sender, receiver);
     }
 
+    // unrecognized command
     return PARSE_ERROR;
 }
 
@@ -257,6 +302,7 @@ int main(int argc, char **argv) {
     SocketInfo client_socket_info = {sockfd, (struct sockaddr *) &clientaddr, clientlen};
 
     RudpReceiver receiver = {};
+    // TODO: add message_timeout
     RudpSender sender = {.sender_timeout=SENDER_TIMEOUT};
 
     /*
@@ -264,12 +310,11 @@ int main(int argc, char **argv) {
      */
     while (1) {
 
-        /*
-         * recvfrom: receive a UDP datagram from a client
-         */
+        // receive a command from the client
         memset(buf, 0, BUFSIZE);
-        // TODO: should we instead receive BUFSIZE-1 since we generally treat the buffer as a string?
-        n = rudp_recv(buf, BUFSIZE, &client_socket_info, &receiver);
+        // we receive BUFSIZE-1 bytes instead of BUFSIZE since we treat the buffer as a string that needs to be
+        // null-terminated
+        n = rudp_recv(buf, BUFSIZE-1, &client_socket_info, &receiver);
 
         if (n < 0)
             error("ERROR in rudp_recv");
@@ -295,10 +340,14 @@ int main(int argc, char **argv) {
                hostp->h_name, hostaddrp);
         printf("server received %lu/%d bytes: %s\n", strlen(buf), n, buf);
 
+        // we keep a copy of the original command since our requirements state "For any other commands, the server
+        // should simply repeat the command back to the client with no modification, stating that the given command was
+        // not understood"
         char original_command[BUFSIZE] = {0,};
         strncpy(original_command, buf, BUFSIZE - 1);
         int status = process_message(buf, &client_socket_info, &sender, &receiver);
         if (status < 0) {
+            // send error message back to the client
             send_error(status, original_command, &client_socket_info, &sender, &receiver);
         }
     }

@@ -1,5 +1,5 @@
 //
-// Simple reliable file transfer client over UDP
+// Client for simple reliable file transfer over UDP
 //
 // Usage: client <host> <port>
 //
@@ -93,7 +93,7 @@ int do_exit(SocketInfo *socket_info, RudpSender *sender, RudpReceiver *receiver)
 }
 
 
-// Handles `get` command
+// Handles `get` command, that transfers a file from the server to the client
 int do_get(char* filename, SocketInfo *socket_info, RudpSender *sender, RudpReceiver *receiver) {
     char command[BUFSIZE] = {};
     int n = snprintf(command, BUFSIZE, "get %s", filename);
@@ -129,7 +129,7 @@ int do_get(char* filename, SocketInfo *socket_info, RudpSender *sender, RudpRece
 }
 
 
-// Handles `put` command
+// Handles `put` command, that transfers a file from the client to the server
 int do_put(char* filename, SocketInfo *socket_info, RudpSender *sender, RudpReceiver *receiver) {
     char command[BUFSIZE] = {};
     int n = snprintf(command, BUFSIZE, "put %s", filename);
@@ -167,7 +167,7 @@ int do_put(char* filename, SocketInfo *socket_info, RudpSender *sender, RudpRece
 }
 
 
-// Handles `delete` command.
+// Handles `delete` command, that deletes a file from the server
 int do_delete(char* filename, SocketInfo *socket_info, RudpSender *sender, RudpReceiver *receiver) {
     char command[BUFSIZE] = {};
     int n = snprintf(command, BUFSIZE, "delete %s", filename);
