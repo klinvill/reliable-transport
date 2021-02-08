@@ -39,13 +39,10 @@
 #define NOT_IMPLEMENTED_ERROR (-3)
 
 
-/*
- * error - wrapper for perror
- */
-// TODO: replace with fatal_error, like for client
-void error(char *msg) {
+// wrapper around perror for errors that should cause the program to terminate with a negative return code
+void fatal_error(char *msg) {
     perror(msg);
-    exit(1);
+    exit(-1);
 }
 
 
@@ -78,8 +75,11 @@ Filenames ls_files(char *directory) {
 
     DIR *dir = opendir(directory);
 
-    if (dir == NULL)
-        error("Could not open directory");
+    if (dir == NULL) {
+        perror("Could not open directory");
+        free(files);
+        return (Filenames) {.count=0, .files=NULL};
+    }
 
     struct dirent *entry;
     struct stat entry_info;
@@ -88,8 +88,10 @@ Filenames ls_files(char *directory) {
         stat(entry->d_name, &entry_info);
         // only return files
         if (S_ISREG(entry_info.st_mode)) {
-            if (i == MAX_FILES)
-                error("Too many files in directory to return them all");
+            if (i == MAX_FILES) {
+                fprintf(stderr, "ERROR in ls_files: Too many files in directory to return them all");
+                break;
+            }
 
             size_t filename_size = strlen(entry->d_name) + 1;
             char *filename = malloc(sizeof(char) * filename_size);
@@ -110,8 +112,10 @@ Filenames ls_files(char *directory) {
 // The message is expected to be a string
 int do_send(char *message, SocketInfo *socket_info, RudpSender *sender, RudpReceiver *receiver) {
     int status = rudp_send(message, strlen(message), socket_info, sender, receiver);
-    if (status < 0)
-        error("ERROR in rudp_send");
+    if (status < 0) {
+        perror("ERROR in rudp_send");
+        return status;
+    }
 
     return status;
 }
@@ -139,8 +143,10 @@ void send_error(int errno, char *command, SocketInfo *socket_info, RudpSender *s
 // Handles `get` command, that transfers a file from the server to the client
 int do_get(char *filename, SocketInfo *socket_info, RudpSender *sender, RudpReceiver *receiver) {
     FILE *f = fopen(filename, "r");
-    if (f == NULL)
-        error("Could not open file for reading");
+    if (f == NULL) {
+        perror("Could not open file for reading");
+        return -1;
+    }
 
     int result = kftp_send_file(f, socket_info, sender, receiver);
     fclose(f);
@@ -151,8 +157,10 @@ int do_get(char *filename, SocketInfo *socket_info, RudpSender *sender, RudpRece
 // Handles `put` command, that transfers a file from the client to the server
 int do_put(char *filename, SocketInfo *socket_info, RudpReceiver *receiver) {
     FILE *f = fopen(filename, "w");
-    if (f == NULL)
-        error("Could not open file for reading");
+    if (f == NULL) {
+        perror("Could not open file for reading");
+        return -1;
+    }
 
     int result = kftp_recv_file(f, socket_info, receiver);
     fclose(f);
@@ -177,6 +185,11 @@ int do_ls(SocketInfo *socket_info, RudpSender *sender, RudpReceiver *receiver) {
     Filenames filenames = ls_files(".");
     char message[BUFSIZE] = {0,};
 
+    if (filenames.files == NULL) {
+        perror("ERROR in ls_files");
+        return -1;
+    }
+
     for (int i = 0; i < filenames.count; i++) {
         char *filename = filenames.files[i];
         // we check for 2 characters extra to hold a newline character and terminating null character
@@ -184,7 +197,8 @@ int do_ls(SocketInfo *socket_info, RudpSender *sender, RudpReceiver *receiver) {
             strcat(message, filename);
             strcat(message, "\n");
         } else {
-            error("The filenames are too large to all fit into the buffer");
+            fprintf(stderr, "ERROR: the filenames from ls are too large to all fit into the buffer");
+            return -1;
         }
     }
     int ret_code = do_send(message, socket_info, sender, receiver);
@@ -272,7 +286,7 @@ int main(int argc, char **argv) {
      */
     sockfd = socket(AF_INET, SOCK_DGRAM, 0);
     if (sockfd < 0)
-        error("ERROR opening socket");
+        fatal_error("ERROR opening socket");
 
     /* setsockopt: Handy debugging trick that lets
      * us rerun the server immediately after we kill it;
@@ -296,7 +310,7 @@ int main(int argc, char **argv) {
      */
     if (bind(sockfd, (struct sockaddr *) &serveraddr,
              sizeof(serveraddr)) < 0)
-        error("ERROR on binding");
+        fatal_error("ERROR on binding");
 
     clientlen = sizeof(clientaddr);
     SocketInfo client_socket_info = {sockfd, (struct sockaddr *) &clientaddr, clientlen};
@@ -316,8 +330,10 @@ int main(int argc, char **argv) {
         // null-terminated
         n = rudp_recv(buf, BUFSIZE-1, &client_socket_info, &receiver);
 
-        if (n < 0)
-            error("ERROR in rudp_recv");
+        if (n < 0) {
+            perror("ERROR in rudp_recv");
+            continue;
+        }
 
 
         // add zero to end of buffer since we treat it as a string
@@ -331,11 +347,15 @@ int main(int argc, char **argv) {
          */
         hostp = gethostbyaddr((const char *) &clientaddr.sin_addr.s_addr,
                               sizeof(clientaddr.sin_addr.s_addr), AF_INET);
-        if (hostp == NULL)
-            error("ERROR on gethostbyaddr");
+        if (hostp == NULL) {
+            perror("ERROR on gethostbyaddr");
+            continue;
+        }
         hostaddrp = inet_ntoa(clientaddr.sin_addr);
-        if (hostaddrp == NULL)
-            error("ERROR on inet_ntoa\n");
+        if (hostaddrp == NULL) {
+            perror("ERROR on inet_ntoa\n");
+            continue;
+        }
         printf("server received datagram from %s (%s)\n",
                hostp->h_name, hostaddrp);
         printf("server received %lu/%d bytes: %s\n", strlen(buf), n, buf);
