@@ -89,7 +89,7 @@ Filenames ls_files(char *directory) {
         // only return files
         if (S_ISREG(entry_info.st_mode)) {
             if (i == MAX_FILES) {
-                fprintf(stderr, "ERROR in ls_files: Too many files in directory to return them all");
+                fprintf(stderr, "ERROR in ls_files: Too many files in directory to return them all\n");
                 break;
             }
 
@@ -197,7 +197,7 @@ int do_ls(SocketInfo *socket_info, RudpSender *sender, RudpReceiver *receiver) {
             strcat(message, filename);
             strcat(message, "\n");
         } else {
-            fprintf(stderr, "ERROR: the filenames from ls are too large to all fit into the buffer");
+            fprintf(stderr, "ERROR: the filenames from ls are too large to all fit into the buffer\n");
             return -1;
         }
     }
