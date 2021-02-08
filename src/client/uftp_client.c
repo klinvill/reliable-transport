@@ -7,13 +7,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
-#include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <netdb.h>
-#include <stdbool.h>
-#include <sys/errno.h>
 
 #include "../common/reliable_udp/reliable_udp.h"
 #include "../common/kftp/kftp.h"
