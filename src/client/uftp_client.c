@@ -1,6 +1,8 @@
 //
 // Simple reliable file transfer client over UDP
 //
+// Usage: client <host> <port>
+//
 // This client uses RUDP (Reliable UDP) and KFTP (Kirby's File Transfer Protocol) to provide this functionality. This
 // work was done as a homework assignment for a networking class.
 //
@@ -22,13 +24,10 @@
 // TODO: standardize error codes between client and server
 #define PARSE_ERROR (-2)
 
-/* 
- * error - wrapper for perror
- */
-// TODO: rename to fatal_error, exit with -1, and ensure that this is only called in the case of fatal errors
-void error(char *msg) {
+// wrapper around perror for errors that should cause the program to terminate with a negative return code
+void fatal_error(char *msg) {
     perror(msg);
-    exit(0);
+    exit(-1);
 }
 
 
@@ -41,8 +40,10 @@ int handle_response(SocketInfo *sock_info, RudpReceiver *receiver) {
     char buf[BUFSIZE];
 
     n = rudp_recv(buf, BUFSIZE, sock_info, receiver);
-    if (n < 0)
-        error("ERROR in recvfrom");
+    if (n < 0) {
+        perror("ERROR in recvfrom");
+        return n;
+    }
 
     buf[n] = 0;
     printf("%s\n", buf);
@@ -60,26 +61,32 @@ int do_ls(SocketInfo *socket_info, RudpSender *sender, RudpReceiver *receiver) {
     // TODO: the limitation to use RUDP effectively means that the listed files must fit into a single message buffer.
     //  should implement ls through KFTP so that larger results can be returned
     int n = rudp_send(command, strlen(command), socket_info, sender, receiver);
-    if (n < 0)
-        error("ERROR in rudp_send");
+    if (n < 0) {
+        perror("ERROR in rudp_send");
+        return n;
+    }
 
     return handle_response(socket_info, receiver);
 }
 
 
 // Handles `exit` command
-void do_exit(SocketInfo *socket_info, RudpSender *sender, RudpReceiver *receiver) {
+int do_exit(SocketInfo *socket_info, RudpSender *sender, RudpReceiver *receiver) {
     char* command = "exit";
 
     // not currently implemented over KFTP, instead send using RUDP
     int n = rudp_send(command, strlen(command), socket_info, sender, receiver);
-    if (n < 0)
-        error("ERROR in rudp_send");
+    if (n < 0) {
+        perror("ERROR in rudp_send");
+        return n;
+    }
 
     // expect a message back from the server that it is exiting gracefully
     n = handle_response(socket_info, receiver);
-    if (n < 0)
-        error("ERROR in handle_response");
+    if (n < 0) {
+        perror("ERROR in handle_response");
+        return n;
+    }
 
     // we terminate the client since the server should also have terminated
     exit(0);
@@ -90,23 +97,32 @@ void do_exit(SocketInfo *socket_info, RudpSender *sender, RudpReceiver *receiver
 int do_get(char* filename, SocketInfo *socket_info, RudpSender *sender, RudpReceiver *receiver) {
     char command[BUFSIZE] = {};
     int n = snprintf(command, BUFSIZE, "get %s", filename);
-    if (n >= BUFSIZE)
-        error("ERROR in sprintf");
+    if (n >= BUFSIZE || n == 0) {
+        perror("ERROR in sprintf");
+        return n;
+    }
 
     // the initial get command (that notifies the server that it should send a file) is currently not
     // implemented using KFTP, so instead we just send it using RUDP
     n = rudp_send(command, strlen(command), socket_info, sender, receiver);
-    if (n < 0)
-        error("ERROR in rudp_send");
+    if (n < 0) {
+        perror("ERROR in rudp_send");
+        return n;
+    }
 
     FILE* fetched_file = fopen(filename, "w");
-    if (fetched_file == NULL)
-        error("ERROR opening file to write to");
+    if (fetched_file == NULL) {
+        perror("ERROR opening file to write to");
+        return n;
+    }
+
     int result = kftp_recv_file(fetched_file, socket_info, receiver);
     fclose(fetched_file);
 
-    if (result < 0)
-        error("ERROR while downloading file");
+    if (result < 0) {
+        perror("ERROR while downloading file");
+        return n;
+    }
 
     printf("Downloaded file: %s\n", filename);
     return result;
@@ -117,23 +133,33 @@ int do_get(char* filename, SocketInfo *socket_info, RudpSender *sender, RudpRece
 int do_put(char* filename, SocketInfo *socket_info, RudpSender *sender, RudpReceiver *receiver) {
     char command[BUFSIZE] = {};
     int n = snprintf(command, BUFSIZE, "put %s", filename);
-    if (n >= BUFSIZE)
-        error("ERROR in sprintf");
+    if (n >= BUFSIZE || n == 0) {
+        perror("ERROR in sprintf");
+        return n;
+    }
+
 
     // the initial put command (that notifies the server that it should prepare to receive a file) is currently not
     // implemented using KFTP, so instead we just send it using RUDP
     n = rudp_send(command, strlen(command), socket_info, sender, receiver);
-    if (n < 0)
-        error("ERROR in rudp_send");
+    if (n < 0) {
+        perror("ERROR in rudp_send");
+        return n;
+    }
 
     FILE* file = fopen(filename, "r");
-    if (file == NULL)
-        error("ERROR opening file to send");
+    if (file == NULL) {
+        perror("ERROR opening file to send");
+        return -1;
+    }
+
     int result = kftp_send_file(file, socket_info, sender, receiver);
     fclose(file);
 
-    if (result < 0)
-        error("ERROR while sending file");
+    if (result < 0) {
+        perror("ERROR while sending file");
+        return result;
+    }
 
     // TODO: should we require the server to send back a message stating that the file was successfully received?
     printf("Sent file: %s\n", filename);
@@ -145,13 +171,17 @@ int do_put(char* filename, SocketInfo *socket_info, RudpSender *sender, RudpRece
 int do_delete(char* filename, SocketInfo *socket_info, RudpSender *sender, RudpReceiver *receiver) {
     char command[BUFSIZE] = {};
     int n = snprintf(command, BUFSIZE, "delete %s", filename);
-    if (n >= BUFSIZE || n == 0)
-        error("ERROR in sprintf");
+    if (n >= BUFSIZE || n == 0) {
+        perror("ERROR in sprintf");
+        return -1;
+    }
 
     // delete is currently not implemented using KFTP, so instead we just send the command using RUDP
     n = rudp_send(command, strlen(command), socket_info, sender, receiver);
-    if (n < 0)
-        error("ERROR in rudp_send");
+    if (n < 0) {
+        perror("ERROR in rudp_send");
+        return n;
+    }
 
     // we expect the server to send back a response when the file is successfully deleted
     return handle_response(socket_info, receiver);
@@ -215,15 +245,20 @@ int run_command(char *command, SocketInfo *socket_info, RudpSender *sender, Rudp
         printf("Invalid command: %s\n", command_copy);
         return 0;
     }
-    else if (result < 0)
-        error("ERROR in process_command");
+    else if (result < 0) {
+        perror("ERROR in process_command");
+        return result;
+    }
+
 
     // acks to server can be lost, so it's possible to successfully finish a task without the server's
     // knowledge. Here we check to make sure there are no outstanding acks before considering the command complete
     char ack_buff[BUFSIZE] = {};
     int status = rudp_check_acks(ack_buff, BUFSIZE, socket_info, receiver);
-    if (status < 0)
-        error("ERROR in rudp_check_acks");
+    if (status < 0) {
+        perror("ERROR in rudp_check_acks");
+        return status;
+    }
 
     return result;
 }
@@ -248,7 +283,7 @@ int main(int argc, char **argv) {
     /* socket: create the socket */
     sockfd = socket(AF_INET, SOCK_DGRAM, 0);
     if (sockfd < 0)
-        error("ERROR opening socket");
+        fatal_error("ERROR opening socket");
 
     /* gethostbyname: get the server's DNS entry */
     server = gethostbyname(hostname);
@@ -286,8 +321,10 @@ int main(int argc, char **argv) {
 
         char* result = fgets(buf, BUFSIZE, stdin);
         if (result == NULL) {
-            if (ferror(stdin) != 0)
-                error("ERROR in fgets");
+            if (ferror(stdin) != 0) {
+                perror("ERROR in fgets");
+                continue;
+            }
             else
                 // could not read any characters
                 continue;
@@ -295,6 +332,6 @@ int main(int argc, char **argv) {
 
         int status = run_command(buf, &sock_info, &sender, &receiver);
         if (status < 0)
-            error("ERROR in run_command");
+            perror("ERROR in run_command");
     }
 }
