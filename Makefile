@@ -1,12 +1,12 @@
 all: client server
 
-client: src/client/udp_client.c .c.o
+client: src/client/uftp_client.c .c.o
 	mkdir -p out/client
-	gcc -std=c99 src/client/udp_client.c -o out/client/client out/common/reliable_udp/reliable_udp.o out/common/reliable_udp/serde.o out/common/utils.o out/common/kftp/kftp.o out/common/kftp/kftp_serde.o
+	gcc -std=c99 src/client/uftp_client.c -o out/client/client out/common/reliable_udp/reliable_udp.o out/common/reliable_udp/serde.o out/common/utils.o out/common/kftp/kftp.o out/common/kftp/kftp_serde.o
 
-server: src/server/udp_server.c .c.o
+server: src/server/uftp_server.c .c.o
 	mkdir -p out/server
-	gcc  -std=c99 src/server/udp_server.c -o out/server/server out/common/reliable_udp/reliable_udp.o out/common/reliable_udp/serde.o out/common/utils.o out/common/kftp/kftp.o out/common/kftp/kftp_serde.o
+	gcc  -std=c99 src/server/uftp_server.c -o out/server/server out/common/reliable_udp/reliable_udp.o out/common/reliable_udp/serde.o out/common/utils.o out/common/kftp/kftp.o out/common/kftp/kftp_serde.o
 
 .c.o: src/common/utils.c src/common/reliable_udp/serde.c src/common/reliable_udp/reliable_udp.c src/common/kftp/kftp.c
 	mkdir -p out/common/reliable_udp out/common/kftp

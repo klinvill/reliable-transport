@@ -1,5 +1,5 @@
 /* 
- * udpserver.c - A simple UDP echo server 
+ * udp_server.c - A simple UDP echo server
  * usage: udpserver <port>
  */
 
