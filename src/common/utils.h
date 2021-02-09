@@ -1,5 +1,5 @@
 //
-// Created by Kirby Linvill on 1/27/21.
+// Miscellaneous helper functions
 //
 
 #ifndef UDP_UTILS_H
