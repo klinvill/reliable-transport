@@ -19,7 +19,7 @@
 // TODO: instead of treating 0 as an empty ACK or SEQ value, should include a flag to specify if a message is an ACK
 //  or SEQ
 #define EMPTY_ACK_NUM 0
-#define INITIAL_TIMEOUT 200     // in milliseconds, timeout until a message will be resent
+#define INITIAL_TIMEOUT 220     // in milliseconds, timeout until a message will be resent
 #define SENDER_TIMEOUT 5000     // in milliseconds, timeout until a message is considered impossible to deliver
 
 // if a receiver sees a message with a sequence number <= its last received sequence number, it will still send an
