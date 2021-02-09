@@ -68,6 +68,9 @@ int kftp_send_file(FILE* read_fp, SocketInfo* to, RudpSender* sender, RudpReceiv
 
     // send out successive file chunks until we've sent the rest of the file
     while (remaining_bytes > 0) {
+        fprintf(stderr, "Progress: %lu%%                         \r", 100 - (remaining_bytes * 100 / file_size));
+        fflush(stderr);
+
         size_t bytes_to_read = min(rudp_size_limit, remaining_bytes);
         read_bytes = fread(rudp_buffer, sizeof(char), bytes_to_read, read_fp);
 
@@ -123,6 +126,9 @@ int kftp_recv_file(FILE* write_fp, SocketInfo* from, RudpReceiver * receiver) {
     }
 
     while(remaining_bytes > 0) {
+        fprintf(stderr, "Progress: %d%%                         \r", 100 - (remaining_bytes * 100 / header.data_size));
+        fflush(stderr);
+
         received_bytes = rudp_recv(rudp_buffer, MAX_PAYLOAD_SIZE, from, receiver);
         if (received_bytes <= 0) {
             fprintf(stderr, "ERROR in kftp_recv_file: error in rudp_recv\n");
