@@ -15,7 +15,7 @@ resources_filepath = Path("tests/resources/")
 
 
 class Client:
-    SOCKET_TIMEOUT = 0.1    # in seconds
+    SOCKET_TIMEOUT = 0.5    # in seconds
 
     def __init__(self, sock: Socket):
         sock.sock.settimeout(self.SOCKET_TIMEOUT)

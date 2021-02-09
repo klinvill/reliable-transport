@@ -316,8 +316,7 @@ int main(int argc, char **argv) {
     SocketInfo client_socket_info = {sockfd, (struct sockaddr *) &clientaddr, clientlen};
 
     RudpReceiver receiver = {};
-    // TODO: add message_timeout
-    RudpSender sender = {.sender_timeout=SENDER_TIMEOUT};
+    RudpSender sender = {.sender_timeout=SENDER_TIMEOUT, .message_timeout=INITIAL_TIMEOUT};
 
     /*
      * main loop: wait for a datagram, then echo it
