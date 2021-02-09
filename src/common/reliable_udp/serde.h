@@ -1,5 +1,5 @@
 //
-// Created by Kirby Linvill on 1/27/21.
+// Provides serialize and deserialize functions for RUDP headers and messages
 //
 
 #ifndef UDP_RELIABLE_UDP_SERDE_H
@@ -7,10 +7,20 @@
 
 #include "types.h"
 
+// Serializes (converts into bytes) an RudpMessage
+//
+// Returns the number of bytes serialized on success, returns a negative int on failure
 int serialize(RudpMessage* message, char* buffer, int buffer_len);
+
+// Deserializes (converts from bytes) an RudpMessage
+//
+// Dynamically allocates a data buffer that must be freed once it is no longer needed
+//
+// Returns the number of bytes deserialized on success, returns a negative int on failure
 int deserialize(char* buffer, int buffer_len, RudpMessage* message);
 
-// methods intended primarily for internal use
+
+// Remaining methods intended primarily for internal use
 int serialize_header(RudpHeader* header, char* buffer, int buffer_len);
 int serialize_int(int number, char* buffer, int buffer_len);
 

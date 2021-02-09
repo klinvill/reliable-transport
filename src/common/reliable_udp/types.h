@@ -1,5 +1,5 @@
 //
-// Created by Kirby Linvill on 1/27/21.
+// Common types and definitions for RUDP (Reliable UDP)
 //
 
 #ifndef UDP_TYPES_H
@@ -8,12 +8,16 @@
 #include <sys/socket.h>
 
 
-#define PAYLOAD_TOO_LARGE_ERROR -2
-#define SENDER_TIMEOUT_ERROR -3
+// Errors
+// TODO: should not clash with other potential return values
+#define PAYLOAD_TOO_LARGE_ERROR (-2)
+#define SENDER_TIMEOUT_ERROR (-3)
 
+// size of RudpHeader in bytes
 #define HEADER_SIZE 12
 
 
+// Holds information about the socket to send/receive data to/from
 typedef struct {
     int sockfd;
     struct sockaddr* addr;
@@ -31,14 +35,16 @@ typedef struct {
     char* data;
 } RudpMessage;
 
+// Information needed when sending a RUDP message
 typedef struct {
-    int last_ack;
-    int message_timeout;
-    int sender_timeout;
+    int last_ack;           // last received ack
+    int message_timeout;    // in milliseconds, timeout until a message should be resent
+    int sender_timeout;     // in milliseconds, timeout until a sender should abort trying to send a message
 } RudpSender;
 
+// Information needed when receiving a RUDP message
 typedef struct {
-    int last_received;
+    int last_received;  // last ack'd seq number
 } RudpReceiver;
 
 #endif //UDP_TYPES_H

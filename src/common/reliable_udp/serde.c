@@ -1,5 +1,5 @@
 //
-// Created by Kirby Linvill on 1/27/21.
+// Provides serialize and deserialize functions for RUDP headers and messages
 //
 
 #include "serde.h"
@@ -10,6 +10,7 @@
 
 
 int serialize(RudpMessage* message, char* buffer, int buffer_len) {
+    // We expect the `data_size` field in the header to accurately represent the size of `buffer`
     unsigned int space_needed = sizeof(message->header) + sizeof(*message->data) * message->header.data_size;
     if (space_needed > buffer_len)
         return PAYLOAD_TOO_LARGE_ERROR;
@@ -24,10 +25,12 @@ int serialize(RudpMessage* message, char* buffer, int buffer_len) {
 
     i += serialized;
 
+    // To serialize the data, we can simply copy it directly to the buffer since they're both char arrays
     memcpy(&buffer[i], message->data, message->header.data_size);
 
     return i + message->header.data_size;
 }
+
 
 int deserialize(char* buffer, int buffer_len, RudpMessage* message) {
     int deserialized = deserialize_header(buffer, buffer_len, &message->header);
@@ -35,6 +38,7 @@ int deserialize(char* buffer, int buffer_len, RudpMessage* message) {
     if (deserialized < 0)
         return -1;
 
+    // We rely on the `data_size` field to determine the size of the `data`
     int expected_data_size = message->header.data_size * sizeof(*message->data);
     int expected_size = deserialized + expected_data_size;
 
@@ -48,6 +52,7 @@ int deserialize(char* buffer, int buffer_len, RudpMessage* message) {
         return -1;
 
     // TODO: make sure message->data is freed
+    // Memory is dynamically allocated here and must be freed once it is no longer needed
     message->data = malloc(expected_data_size);
     memcpy(message->data, &buffer[deserialized], expected_data_size);
 
@@ -55,6 +60,7 @@ int deserialize(char* buffer, int buffer_len, RudpMessage* message) {
 }
 
 
+// Helper function that serializes a RudpHeader
 int serialize_header(RudpHeader* header, char* buffer, int buffer_len) {
     // TODO: error handling
     if (buffer_len < sizeof(*header))
@@ -84,6 +90,10 @@ int serialize_header(RudpHeader* header, char* buffer, int buffer_len) {
     return i;
 }
 
+
+// Helper function to serialize ints.
+//
+// This function stores ints in a big-endian format.
 int serialize_int(int value, char* buffer, int buffer_len) {
     // TODO: error handling
     if (buffer_len < sizeof(value))
@@ -98,6 +108,10 @@ int serialize_int(int value, char* buffer, int buffer_len) {
     return 4;
 }
 
+
+// Helper function to deserialize a RudpHeader
+//
+// Since the RudpHeader has a fixed size, this function does not need to dynamically allocate any memory
 int deserialize_header(char* buffer, int buffer_len, RudpHeader* header) {
     // TODO: error handling
     if (buffer_len < sizeof(*header))
@@ -127,6 +141,8 @@ int deserialize_header(char* buffer, int buffer_len, RudpHeader* header) {
     return i;
 }
 
+
+// Helper function to deserialize an int, stored in big-endian format
 int deserialize_int(char* buffer, int buffer_len, int* value) {
     int expected_int_size = 4;
     // TODO: error handling
