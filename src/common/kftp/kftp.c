@@ -93,6 +93,7 @@ int kftp_send_file(FILE* read_fp, SocketInfo* to, RudpSender* sender, RudpReceiv
     }
 
     assert(remaining_bytes == 0);
+    fprintf(stderr, "Done                                  \n");
     return 0;
 }
 
@@ -145,5 +146,6 @@ int kftp_recv_file(FILE* write_fp, SocketInfo* from, RudpReceiver * receiver) {
     }
 
     assert(remaining_bytes == 0);
+    fprintf(stderr, "Done                                  \n");
     return 0;
 }
